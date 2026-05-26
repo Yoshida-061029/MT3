@@ -20,7 +20,6 @@ static const int kColumnWidth = 60;
 static const int kWindowWidth = 1280;
 static const int kWindowHeight = 720;
 
-
 Vector3 Cross(const Vector3& a, const Vector3& b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
 
 Matrix4x4 MakeAffineMatrix(const Vector3& scale, const Vector3& rotate, const Vector3& translate) {
@@ -141,7 +140,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	Vector3 cameraPosition = {0.0f, 0.0f, -10.0f};
 
-	
 	Vector3 a = {1.0f, 3.0f, 0.0f};
 	Vector3 b = {2.0f, -1.0f, 0.0f};
 
@@ -180,7 +178,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			screenVertices[i] = Transform(ndcVertex, viewportMatrix);
 		}
 
-		
 		Vector3 cross = Cross(a, b);
 
 		///
@@ -193,7 +190,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		Novice::ScreenPrintf(0, 0, "translate: %.2f %.2f %.2f  rotate.y: %.2f", translate.x, translate.y, translate.z, rotate.y);
 
-		
 		Novice::ScreenPrintf(0, kRowHeight, "a      : (%.2f, %.2f, %.2f)", a.x, a.y, a.z);
 		Novice::ScreenPrintf(0, kRowHeight * 2, "b      : (%.2f, %.2f, %.2f)", b.x, b.y, b.z);
 		Novice::ScreenPrintf(0, kRowHeight * 3, "Cross  : (%.2f, %.2f, %.2f)", cross.x, cross.y, cross.z);
