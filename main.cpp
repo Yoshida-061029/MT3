@@ -1,5 +1,6 @@
 #include <Novice.h>
 #include <cmath>
+#include <stdio.h>
 
 const char kWindowTitle[] = "GC2C_08_ヨシダ_ハルキ";
 
@@ -13,60 +14,43 @@ struct Matrix4x4 {
 	float m[4][4];
 };
 
-Matrix4x4 MakeRotateXMatrix(float radian) {
-	Matrix4x4 result = {};
-	result.m[0][0] = 1.0f;
-	result.m[1][1] = std::cos(radian);
-	result.m[1][2] = std::sin(radian);
-	result.m[2][1] = -std::sin(radian);
-	result.m[2][2] = std::cos(radian);
-	result.m[3][3] = 1.0f;
-	return result;
-}
-
-Matrix4x4 MakeRotateYMatrix(float radian) {
-	Matrix4x4 result = {};
-	result.m[0][0] = std::cos(radian);
-	result.m[0][2] = -std::sin(radian);
-	result.m[1][1] = 1.0f;
-	result.m[2][0] = std::sin(radian);
-	result.m[2][2] = std::cos(radian);
-	result.m[3][3] = 1.0f;
-	return result;
-}
-
-Matrix4x4 MakeRotateZMatrix(float radian) {
-	Matrix4x4 result = {};
-	result.m[0][0] = std::cos(radian);
-	result.m[0][1] = std::sin(radian);
-	result.m[1][0] = -std::sin(radian);
-	result.m[1][1] = std::cos(radian);
-	result.m[2][2] = 1.0f;
-	result.m[3][3] = 1.0f;
-	return result;
-}
-
-Matrix4x4 Multiply(const Matrix4x4& m1, const Matrix4x4& m2) {
-	Matrix4x4 result = {};
-	for (int i = 0; i < 4; i++) {
-		for (int j = 0; j < 4; j++) {
-			for (int k = 0; k < 4; k++) {
-				result.m[i][j] += m1.m[i][k] * m2.m[k][j];
-			}
-		}
-	}
-	return result;
-}
-
-static const int kRowHeight = 20;
-static const int kColumnWidth = 60;
-void MatrixScreenPrintf(int x, int y, const Matrix4x4& matrix, const char* label) {
+void MatrixScreenPrintf(int x, int y, const Matrix4x4& m, const char* label) {
 	Novice::ScreenPrintf(x, y, "%s", label);
 	for (int row = 0; row < 4; row++) {
-		for (int column = 0; column < 4; column++) {
-			Novice::ScreenPrintf(x + column * kColumnWidth, y + (row + 1) * kRowHeight, "%6.02f", matrix.m[row][column]);
+		for (int col = 0; col < 4; col++) {
+			Novice::ScreenPrintf(x + col * 80, y + 20 + row * 20, "%6.2f", m.m[row][col]);
 		}
 	}
+}
+
+Matrix4x4 MakeAffineMatrix(const Vector3& scale, const Vector3& rotate, const Vector3& translate) {
+	float sx = std::sin(rotate.x), cx = std::cos(rotate.x);
+	float sy = std::sin(rotate.y), cy = std::cos(rotate.y);
+	float sz = std::sin(rotate.z), cz = std::cos(rotate.z);
+
+	Matrix4x4 result;
+
+	result.m[0][0] = scale.x * (cy * cz);
+	result.m[0][1] = scale.x * (cy * sz);
+	result.m[0][2] = scale.x * (-sy);
+	result.m[0][3] = 0.0f;
+
+	result.m[1][0] = scale.y * (sx * sy * cz - cx * sz);
+	result.m[1][1] = scale.y * (sx * sy * sz + cx * cz);
+	result.m[1][2] = scale.y * (sx * cy);
+	result.m[1][3] = 0.0f;
+
+	result.m[2][0] = scale.z * (cx * sy * cz + sx * sz);
+	result.m[2][1] = scale.z * (cx * sy * sz - sx * cz);
+	result.m[2][2] = scale.z * (cx * cy);
+	result.m[2][3] = 0.0f;
+
+	result.m[3][0] = translate.x;
+	result.m[3][1] = translate.y;
+	result.m[3][2] = translate.z;
+	result.m[3][3] = 1.0f;
+
+	return result;
 }
 
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -86,12 +70,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		/// ↓更新処理ここから
 		///
 
+		Vector3 scale{1.2f, 0.79f, -2.1f};
 		Vector3 rotate{0.4f, 1.43f, -0.8f};
+		Vector3 translate{2.7f, -4.15f, 1.57f};
 
-		Matrix4x4 rotateXMatrix = MakeRotateXMatrix(rotate.x);
-		Matrix4x4 rotateYMatrix = MakeRotateYMatrix(rotate.y);
-		Matrix4x4 rotateZMatrix = MakeRotateZMatrix(rotate.z);
-		Matrix4x4 rotateXYZMatrix = Multiply(rotateXMatrix, Multiply(rotateYMatrix, rotateZMatrix));
+		Matrix4x4 worldMatrix = MakeAffineMatrix(scale, rotate, translate);
 
 		///
 		/// ↑更新処理ここまで
@@ -101,10 +84,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		/// ↓描画処理ここから
 		///
 
-		MatrixScreenPrintf(0, kRowHeight * 0, rotateXMatrix, "rotateXMatrix");
-		MatrixScreenPrintf(0, kRowHeight * 5, rotateYMatrix, "rotateYMatrix");
-		MatrixScreenPrintf(0, kRowHeight * 5 * 2, rotateZMatrix, "rotateZMatrix");
-		MatrixScreenPrintf(0, kRowHeight * 5 * 3, rotateXYZMatrix, "rotateXYZMatrix");
+		MatrixScreenPrintf(0, 0, worldMatrix, "worldMatrix");
 
 		///
 		/// ↑描画処理ここまで
