@@ -19,7 +19,8 @@ static const int kColumnWidth = 60;
 static const int kWindowWidth = 1280;
 static const int kWindowHeight = 720;
 
-Vector3 Cross(const Vector3& a, const Vector3& b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+Vector3 Cross(const Vector3& v1, const Vector3& v2) { return {v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x}; }
+void VectorScreenPrintf(int x, int y, const Vector3& v, const char* label) { Novice::ScreenPrintf(x, y, "%s: (%.2f, %.2f, %.2f)", label, v.x, v.y, v.z); }
 
 Matrix4x4 MakeAffineMatrix(const Vector3& scale, const Vector3& rotate, const Vector3& translate) {
 	Matrix4x4 result = {};
@@ -187,9 +188,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		Novice::ScreenPrintf(0, 0, "translate: %.2f %.2f %.2f  rotate.y: %.2f", translate.x, translate.y, translate.z, rotate.y);
-		Novice::ScreenPrintf(0, kRowHeight, "v1    : (%.2f, %.2f, %.2f)", v1.x, v1.y, v1.z);
-		Novice::ScreenPrintf(0, kRowHeight * 2, "v2    : (%.2f, %.2f, %.2f)", v2.x, v2.y, v2.z);
-		Novice::ScreenPrintf(0, kRowHeight * 3, "Cross : (%.2f, %.2f, %.2f)", cross.x, cross.y, cross.z);
+		VectorScreenPrintf(0, kRowHeight, v1, "v1");
+		VectorScreenPrintf(0, kRowHeight * 2, v2, "v2");
+		VectorScreenPrintf(0, kRowHeight * 3, cross, "Cross");
 
 		Novice::DrawTriangle(
 		    int(screenVertices[0].x), int(screenVertices[0].y), int(screenVertices[1].x), int(screenVertices[1].y), int(screenVertices[2].x), int(screenVertices[2].y), RED, kFillModeSolid);
