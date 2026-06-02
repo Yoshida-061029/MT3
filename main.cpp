@@ -1,13 +1,13 @@
 #define _USE_MATH_DEFINES
 #include <Novice.h>
-#include <algorithm> 
+#include <algorithm>
 #include <cmath>
 #include <imgui.h>
 #include <stdio.h>
 
 const char kWindowTitle[] = "GC2C_08_ヨシダ_ハルキ";
-const int kWindowWidth = 1280;
 const int kWindowHeight = 720;
+const int kWindowWidth = 1280;
 
 constexpr float kPi = 3.14159265358979323846f;
 
@@ -20,8 +20,14 @@ struct Matrix4x4 {
 };
 
 struct AABB {
-	Vector3 min; //!< 最小点
-	Vector3 max; //!< 最大点
+	Vector3 min; 
+	Vector3 max; 
+};
+
+// ★追加
+struct Sphere {
+	Vector3 center;
+	float radius;
 };
 
 Vector3 Subtract(const Vector3& a, const Vector3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -171,8 +177,21 @@ void DrawGrid(const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMa
 	}
 }
 
-bool IsCollision(const AABB& aabb1, const AABB& aabb2) {
-	return (aabb1.min.x <= aabb2.max.x && aabb1.max.x >= aabb2.min.x) && (aabb1.min.y <= aabb2.max.y && aabb1.max.y >= aabb2.min.y) && (aabb1.min.z <= aabb2.max.z && aabb1.max.z >= aabb2.min.z);
+bool IsCollision(const AABB& aabb, const AABB& aabb2) {
+	return (aabb.min.x <= aabb2.max.x && aabb.max.x >= aabb2.min.x) && (aabb.min.y <= aabb2.max.y && aabb.max.y >= aabb2.min.y) && (aabb.min.z <= aabb2.max.z && aabb.max.z >= aabb2.min.z);
+}
+
+
+bool IsCollision(const AABB& aabb, const Sphere& sphere) {
+	
+	Vector3 closestPoint = {
+	    std::clamp(sphere.center.x, aabb.min.x, aabb.max.x),
+	    std::clamp(sphere.center.y, aabb.min.y, aabb.max.y),
+	    std::clamp(sphere.center.z, aabb.min.z, aabb.max.z),
+	};
+	
+	float distSq = LengthSquared(Subtract(closestPoint, sphere.center));
+	return distSq <= sphere.radius * sphere.radius;
 }
 
 void DrawAABB(const AABB& aabb, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
@@ -192,21 +211,59 @@ void DrawAABB(const AABB& aabb, const Matrix4x4& viewProjectionMatrix, const Mat
 		screen[i] = Transform(Transform(vertices[i], viewProjectionMatrix), viewportMatrix);
 	}
 
-	// 底面 (z=min)
+	
 	Novice::DrawLine((int)screen[0].x, (int)screen[0].y, (int)screen[1].x, (int)screen[1].y, color);
 	Novice::DrawLine((int)screen[0].x, (int)screen[0].y, (int)screen[2].x, (int)screen[2].y, color);
 	Novice::DrawLine((int)screen[1].x, (int)screen[1].y, (int)screen[3].x, (int)screen[3].y, color);
 	Novice::DrawLine((int)screen[2].x, (int)screen[2].y, (int)screen[3].x, (int)screen[3].y, color);
-	// 上面 (z=max)
+
 	Novice::DrawLine((int)screen[4].x, (int)screen[4].y, (int)screen[5].x, (int)screen[5].y, color);
 	Novice::DrawLine((int)screen[4].x, (int)screen[4].y, (int)screen[6].x, (int)screen[6].y, color);
 	Novice::DrawLine((int)screen[5].x, (int)screen[5].y, (int)screen[7].x, (int)screen[7].y, color);
 	Novice::DrawLine((int)screen[6].x, (int)screen[6].y, (int)screen[7].x, (int)screen[7].y, color);
-	// 柱
+	
 	Novice::DrawLine((int)screen[0].x, (int)screen[0].y, (int)screen[4].x, (int)screen[4].y, color);
 	Novice::DrawLine((int)screen[1].x, (int)screen[1].y, (int)screen[5].x, (int)screen[5].y, color);
 	Novice::DrawLine((int)screen[2].x, (int)screen[2].y, (int)screen[6].x, (int)screen[6].y, color);
 	Novice::DrawLine((int)screen[3].x, (int)screen[3].y, (int)screen[7].x, (int)screen[7].y, color);
+}
+
+void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
+	const int kSubdivision = 16;
+	const float kLatStep = kPi / kSubdivision;
+	const float kLonStep = 2.0f * kPi / kSubdivision;
+
+	for (int lat = 0; lat < kSubdivision; lat++) {
+		float theta1 = -kPi / 2.0f + lat * kLatStep;
+		float theta2 = theta1 + kLatStep;
+		for (int lon = 0; lon < kSubdivision; lon++) {
+			float phi1 = lon * kLonStep;
+			float phi2 = phi1 + kLonStep;
+
+			Vector3 a = {
+			    sphere.center.x + sphere.radius * cosf(theta1) * cosf(phi1),
+			    sphere.center.y + sphere.radius * sinf(theta1),
+			    sphere.center.z + sphere.radius * cosf(theta1) * sinf(phi1),
+			};
+			Vector3 b = {
+			    sphere.center.x + sphere.radius * cosf(theta2) * cosf(phi1),
+			    sphere.center.y + sphere.radius * sinf(theta2),
+			    sphere.center.z + sphere.radius * cosf(theta2) * sinf(phi1),
+			};
+			Vector3 c = {
+			    sphere.center.x + sphere.radius * cosf(theta1) * cosf(phi2),
+			    sphere.center.y + sphere.radius * sinf(theta1),
+			    sphere.center.z + sphere.radius * cosf(theta1) * sinf(phi2),
+			};
+
+			Vector3 sa = Transform(Transform(a, viewProjectionMatrix), viewportMatrix);
+			Vector3 sb = Transform(Transform(b, viewProjectionMatrix), viewportMatrix);
+			Vector3 sc = Transform(Transform(c, viewProjectionMatrix), viewportMatrix);
+
+			Novice::DrawLine((int)sa.x, (int)sa.y, (int)sb.x, (int)sb.y, color);
+			Novice::DrawLine((int)sa.x, (int)sa.y, (int)sc.x, (int)sc.y, color);
+		}
+	}
 }
 
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -215,13 +272,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Vector3 cameraTranslate{0.0f, 1.9f, -6.49f};
 	Vector3 cameraRotate{0.26f, 0.0f, 0.0f};
 
-	AABB aabb1{
+	AABB aabb{
 	    .min = {-0.5f, -0.5f, -0.5f},
 	    .max = {0.0f,  0.0f,  0.0f },
 	};
-	AABB aabb2{
-	    .min = {0.2f, 0.2f, 0.2f},
-	    .max = {1.0f, 1.0f, 1.0f},
+	Sphere sphere{
+	    .center = {0.0f, 0.0f, 0.0f},
+	    .radius = 0.5f,
 	};
 
 	char keys[256] = {0};
@@ -238,26 +295,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		ImGui::Begin("Window");
-		ImGui::DragFloat3("aabb1.min", &aabb1.min.x, 0.01f);
-		ImGui::DragFloat3("aabb1.max", &aabb1.max.x, 0.01f);
-		ImGui::DragFloat3("aabb2.min", &aabb2.min.x, 0.01f);
-		ImGui::DragFloat3("aabb2.max", &aabb2.max.x, 0.01f);
+		ImGui::DragFloat3("aabb.min", &aabb.min.x, 0.01f);
+		ImGui::DragFloat3("aabb.max", &aabb.max.x, 0.01f);
+		ImGui::DragFloat3("sphere.center", &sphere.center.x, 0.01f);
+		ImGui::DragFloat("sphere.radius", &sphere.radius, 0.01f);
 		ImGui::End();
 
-		// minとmaxが入れ替わらないように補正
-		aabb1.min.x = (std::min)(aabb1.min.x, aabb1.max.x);
-		aabb1.max.x = (std::max)(aabb1.min.x, aabb1.max.x);
-		aabb1.min.y = (std::min)(aabb1.min.y, aabb1.max.y);
-		aabb1.max.y = (std::max)(aabb1.min.y, aabb1.max.y);
-		aabb1.min.z = (std::min)(aabb1.min.z, aabb1.max.z);
-		aabb1.max.z = (std::max)(aabb1.min.z, aabb1.max.z);
-
-		aabb2.min.x = (std::min)(aabb2.min.x, aabb2.max.x);
-		aabb2.max.x = (std::max)(aabb2.min.x, aabb2.max.x);
-		aabb2.min.y = (std::min)(aabb2.min.y, aabb2.max.y);
-		aabb2.max.y = (std::max)(aabb2.min.y, aabb2.max.y);
-		aabb2.min.z = (std::min)(aabb2.min.z, aabb2.max.z);
-		aabb2.max.z = (std::max)(aabb2.min.z, aabb2.max.z);
+		aabb.min.x = (std::min)(aabb.min.x, aabb.max.x);
+		aabb.max.x = (std::max)(aabb.min.x, aabb.max.x);
+		aabb.min.y = (std::min)(aabb.min.y, aabb.max.y);
+		aabb.max.y = (std::max)(aabb.min.y, aabb.max.y);
+		aabb.min.z = (std::min)(aabb.min.z, aabb.max.z);
+		aabb.max.z = (std::max)(aabb.min.z, aabb.max.z);
 
 		Matrix4x4 cameraRotateMatrix = Multiply(Multiply(MakeRotateXMatrix(cameraRotate.x), MakeRotateYMatrix(cameraRotate.y)), MakeRotateZMatrix(cameraRotate.z));
 		Matrix4x4 cameraMatrix = Multiply(cameraRotateMatrix, MakeTranslateMatrix(cameraTranslate));
@@ -266,7 +315,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		Matrix4x4 viewProjectionMatrix = Multiply(viewMatrix, projectionMatrix);
 		Matrix4x4 viewportMatrix = MakeViewportMatrix(0, 0, float(kWindowWidth), float(kWindowHeight), 0.0f, 1.0f);
 
-		bool collision = IsCollision(aabb1, aabb2);
+		bool collision = IsCollision(aabb, sphere);
 		uint32_t color = collision ? 0xFF0000FF : 0xFFFFFFFF;
 
 		///
@@ -278,8 +327,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
-		DrawAABB(aabb1, viewProjectionMatrix, viewportMatrix, color);
-		DrawAABB(aabb2, viewProjectionMatrix, viewportMatrix, color);
+		DrawAABB(aabb, viewProjectionMatrix, viewportMatrix, color);
+		DrawSphere(sphere, viewProjectionMatrix, viewportMatrix, color);
 
 		///
 		/// ↑描画処理ここまで
