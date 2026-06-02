@@ -16,7 +16,6 @@ struct Matrix4x4 {
 
 static const int kRowHeight = 20;
 static const int kColumnWidth = 60;
-
 static const int kWindowWidth = 1280;
 static const int kWindowHeight = 720;
 
@@ -137,11 +136,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	Vector3 rotate = {0.0f, 0.0f, 0.0f};
 	Vector3 translate = {0.0f, 0.0f, 5.0f};
-
 	Vector3 cameraPosition = {0.0f, 0.0f, -10.0f};
 
-	Vector3 a = {1.0f, 3.0f, 0.0f};
-	Vector3 b = {2.0f, -1.0f, 0.0f};
+	Vector3 v1 = {1.2f, -3.9f, 2.5f};
+	Vector3 v2 = {2.8f, 0.4f, -1.3f};
 
 	while (Novice::ProcessMessage() == 0) {
 		Novice::BeginFrame();
@@ -178,7 +176,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			screenVertices[i] = Transform(ndcVertex, viewportMatrix);
 		}
 
-		Vector3 cross = Cross(a, b);
+		Vector3 cross = Cross(v1, v2);
 
 		///
 		/// ↑更新処理ここまで
@@ -189,10 +187,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		Novice::ScreenPrintf(0, 0, "translate: %.2f %.2f %.2f  rotate.y: %.2f", translate.x, translate.y, translate.z, rotate.y);
-
-		Novice::ScreenPrintf(0, kRowHeight, "a      : (%.2f, %.2f, %.2f)", a.x, a.y, a.z);
-		Novice::ScreenPrintf(0, kRowHeight * 2, "b      : (%.2f, %.2f, %.2f)", b.x, b.y, b.z);
-		Novice::ScreenPrintf(0, kRowHeight * 3, "Cross  : (%.2f, %.2f, %.2f)", cross.x, cross.y, cross.z);
+		Novice::ScreenPrintf(0, kRowHeight, "v1    : (%.2f, %.2f, %.2f)", v1.x, v1.y, v1.z);
+		Novice::ScreenPrintf(0, kRowHeight * 2, "v2    : (%.2f, %.2f, %.2f)", v2.x, v2.y, v2.z);
+		Novice::ScreenPrintf(0, kRowHeight * 3, "Cross : (%.2f, %.2f, %.2f)", cross.x, cross.y, cross.z);
 
 		Novice::DrawTriangle(
 		    int(screenVertices[0].x), int(screenVertices[0].y), int(screenVertices[1].x), int(screenVertices[1].y), int(screenVertices[2].x), int(screenVertices[2].y), RED, kFillModeSolid);
