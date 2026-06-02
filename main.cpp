@@ -20,6 +20,8 @@ static const int kWindowWidth = 1280;
 static const int kWindowHeight = 720;
 
 Vector3 Cross(const Vector3& v1, const Vector3& v2) { return {v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x}; }
+
+// クロス積などのVector3を画面に表示する関数
 void VectorScreenPrintf(int x, int y, const Vector3& v, const char* label) { Novice::ScreenPrintf(x, y, "%s: (%.2f, %.2f, %.2f)", label, v.x, v.y, v.z); }
 
 Matrix4x4 MakeAffineMatrix(const Vector3& scale, const Vector3& rotate, const Vector3& translate) {
@@ -29,17 +31,17 @@ Matrix4x4 MakeAffineMatrix(const Vector3& scale, const Vector3& rotate, const Ve
 	float cosZ = std::cos(rotate.z), sinZ = std::sin(rotate.z);
 
 	result.m[0][0] = scale.x * (cosY * cosZ + sinX * sinY * sinZ);
-	result.m[0][1] = scale.x * (cosX * sinZ);
-	result.m[0][2] = scale.x * (-sinY * cosZ + sinX * cosY * sinZ);
+	result.m[0][1] = scale.x * (-cosX * sinZ);
+	result.m[0][2] = scale.x * (sinY * cosZ + sinX * cosY * sinZ);
 	result.m[0][3] = 0.0f;
 
-	result.m[1][0] = scale.y * (-cosY * sinZ + sinX * sinY * cosZ);
+	result.m[1][0] = scale.y * (cosY * sinZ + sinX * sinY * cosZ);
 	result.m[1][1] = scale.y * (cosX * cosZ);
-	result.m[1][2] = scale.y * (sinY * sinZ + sinX * cosY * cosZ);
+	result.m[1][2] = scale.y * (sinY * sinZ - sinX * cosY * cosZ);
 	result.m[1][3] = 0.0f;
 
-	result.m[2][0] = scale.z * (cosX * sinY);
-	result.m[2][1] = scale.z * (-sinX);
+	result.m[2][0] = scale.z * (-cosX * sinY);
+	result.m[2][1] = scale.z * (sinX);
 	result.m[2][2] = scale.z * (cosX * cosY);
 	result.m[2][3] = 0.0f;
 
@@ -177,6 +179,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 			screenVertices[i] = Transform(ndcVertex, viewportMatrix);
 		}
 
+		// クロス積の計算
 		Vector3 cross = Cross(v1, v2);
 
 		///
@@ -188,6 +191,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		Novice::ScreenPrintf(0, 0, "translate: %.2f %.2f %.2f  rotate.y: %.2f", translate.x, translate.y, translate.z, rotate.y);
+
+		// クロス積の確認表示
 		VectorScreenPrintf(0, kRowHeight, v1, "v1");
 		VectorScreenPrintf(0, kRowHeight * 2, v2, "v2");
 		VectorScreenPrintf(0, kRowHeight * 3, cross, "Cross");
