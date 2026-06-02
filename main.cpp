@@ -23,13 +23,39 @@ struct Sphere {
 	float radius;
 };
 
-bool IsCollision(const Sphere& s1, const Sphere& s2) {
-	float dx = s2.center.x - s1.center.x;
-	float dy = s2.center.y - s1.center.y;
-	float dz = s2.center.z - s1.center.z;
-	float distSq = dx * dx + dy * dy + dz * dz;
-	float radiusSum = s1.radius + s2.radius;
-	return distSq <= radiusSum * radiusSum;
+
+struct Plane {
+	Vector3 normal;
+	float distance;
+};
+
+Vector3 Add(const Vector3& a, const Vector3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+
+Vector3 Multiply(float s, const Vector3& v) { return {s * v.x, s * v.y, s * v.z}; }
+
+float Dot(const Vector3& a, const Vector3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+float Length(const Vector3& v) { return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); }
+
+Vector3 Normalize(const Vector3& v) {
+	float len = Length(v);
+	if (len < 1e-6f)
+		return {0, 0, 0};
+	return {v.x / len, v.y / len, v.z / len};
+}
+
+Vector3 Cross(const Vector3& a, const Vector3& b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+
+Vector3 Perpendicular(const Vector3& v) {
+	if (v.x != 0.0f || v.y != 0.0f) {
+		return {-v.y, v.x, 0.0f};
+	}
+	return {0.0f, -v.z, v.y};
+}
+
+bool IsCollision(const Sphere& sphere, const Plane& plane) {
+	float dist = Dot(sphere.center, plane.normal) - plane.distance;
+	return fabsf(dist) <= sphere.radius;
 }
 
 Matrix4x4 Multiply(const Matrix4x4& a, const Matrix4x4& b) {
@@ -158,7 +184,6 @@ void DrawGrid(const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMa
 		uint32_t color = (i == kSubdivision / 2) ? 0x000000FF : 0xAAAAAAFF;
 		Novice::DrawLine((int)s.x, (int)s.y, (int)e.x, (int)e.y, color);
 	}
-
 	for (int i = 0; i <= kSubdivision; i++) {
 		float z = -kGridHalfWidth + kStep * i;
 		Vector3 start = {-kGridHalfWidth, 0.0f, z};
@@ -178,7 +203,6 @@ void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, con
 	for (int latIdx = 0; latIdx < kSubdivision; latIdx++) {
 		float lat0 = -kPi / 2.0f + kLatStep * latIdx;
 		float lat1 = lat0 + kLatStep;
-
 		for (int lonIdx = 0; lonIdx < kSubdivision; lonIdx++) {
 			float lon0 = kLonStep * lonIdx;
 			float lon1 = lon0 + kLonStep;
@@ -197,17 +221,45 @@ void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, con
 	}
 }
 
+
+void DrawPlane(const Plane& plane, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
+	
+	Vector3 center = Multiply(plane.distance, plane.normal);
+
+	Vector3 perpendiculars[4];
+	perpendiculars[0] = Normalize(Perpendicular(plane.normal));                             // 2
+	perpendiculars[1] = {-perpendiculars[0].x, -perpendiculars[0].y, -perpendiculars[0].z}; // 3
+	perpendiculars[2] = Cross(plane.normal, perpendiculars[0]);                             // 4
+	perpendiculars[3] = {-perpendiculars[2].x, -perpendiculars[2].y, -perpendiculars[2].z}; // 5
+
+	
+	Vector3 points[4];
+	for (int i = 0; i < 4; i++) {
+		Vector3 extend = Multiply(2.0f, perpendiculars[i]);
+		Vector3 point = Add(center, extend);
+		points[i] = Transform(Transform(point, viewProjectionMatrix), viewportMatrix);
+	}
+
+	
+	Novice::DrawLine((int)points[0].x, (int)points[0].y, (int)points[2].x, (int)points[2].y, color);
+	Novice::DrawLine((int)points[2].x, (int)points[2].y, (int)points[1].x, (int)points[1].y, color);
+	Novice::DrawLine((int)points[1].x, (int)points[1].y, (int)points[3].x, (int)points[3].y, color);
+	Novice::DrawLine((int)points[3].x, (int)points[3].y, (int)points[0].x, (int)points[0].y, color);
+}
+
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Novice::Initialize(kWindowTitle, kWindowWidth, kWindowHeight);
 
 	Vector3 cameraTranslate{0.0f, 1.9f, -6.49f};
 	Vector3 cameraRotate{0.26f, 0.0f, 0.0f};
 
-	Sphere spheres[2];
-	spheres[0].center = {0.0f, 0.0f, 0.0f};
-	spheres[0].radius = 0.8f;
-	spheres[1].center = {1.0f, 0.0f, 0.0f};
-	spheres[1].radius = 0.5f;
+	Sphere sphere;
+	sphere.center = {0.0f, 0.0f, 0.0f};
+	sphere.radius = 0.8f;
+
+	Plane plane;
+	plane.normal = {0.0f, 1.0f, 0.0f};
+	plane.distance = 1.0f;
 
 	char keys[256] = {0};
 	char preKeys[256] = {0};
@@ -225,11 +277,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		ImGui::Begin("Window");
 		ImGui::DragFloat3("CameraTranslate", &cameraTranslate.x, 0.01f);
 		ImGui::DragFloat3("CameraRotate", &cameraRotate.x, 0.01f);
+		ImGui::DragFloat3("Sphere.Center", &sphere.center.x, 0.01f);
+		ImGui::DragFloat("Sphere.Radius", &sphere.radius, 0.01f);
+		ImGui::DragFloat3("Plane.Normal", &plane.normal.x, 0.01f);
 		
-		ImGui::DragFloat3("Sphere[0].Center", &spheres[0].center.x, 0.01f);
-		ImGui::DragFloat("Sphere[0].Radius", &spheres[0].radius, 0.01f);
-		ImGui::DragFloat3("Sphere[1].Center", &spheres[1].center.x, 0.01f);
-		ImGui::DragFloat("Sphere[1].Radius", &spheres[1].radius, 0.01f);
+		plane.normal = Normalize(plane.normal);
+		ImGui::DragFloat("Plane.Distance", &plane.distance, 0.01f);
 		ImGui::End();
 
 		Matrix4x4 cameraRotateMatrix = Multiply(Multiply(MakeRotateXMatrix(cameraRotate.x), MakeRotateYMatrix(cameraRotate.y)), MakeRotateZMatrix(cameraRotate.z));
@@ -239,7 +292,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		Matrix4x4 viewProjectionMatrix = Multiply(viewMatrix, projectionMatrix);
 		Matrix4x4 viewportMatrix = MakeViewportMatrix(0, 0, float(kWindowWidth), float(kWindowHeight), 0.0f, 1.0f);
 
-		bool collision = IsCollision(spheres[0], spheres[1]);
+		bool collision = IsCollision(sphere, plane);
 
 		///
 		/// ↑更新処理ここまで
@@ -250,9 +303,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
-		uint32_t color = collision ? 0xFF0000FF : 0xFFFFFFFF;
-		DrawSphere(spheres[0], viewProjectionMatrix, viewportMatrix, color);
-		DrawSphere(spheres[1], viewProjectionMatrix, viewportMatrix, color);
+		uint32_t sphereColor = collision ? 0xFF0000FF : 0xFFFFFFFF;
+		DrawSphere(sphere, viewProjectionMatrix, viewportMatrix, sphereColor);
+		DrawPlane(plane, viewProjectionMatrix, viewportMatrix, 0xFFFFFFFF);
 
 		///
 		/// ↑描画処理ここまで
