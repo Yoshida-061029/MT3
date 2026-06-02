@@ -18,37 +18,18 @@ struct Matrix4x4 {
 	float m[4][4];
 };
 
-struct Segment {
-	Vector3 origin;
-	Vector3 diff;
+struct Sphere {
+	Vector3 center;
+	float radius;
 };
 
-Vector3 Subtract(const Vector3& a, const Vector3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
-
-Vector3 Add(const Vector3& a, const Vector3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
-
-float Dot(const Vector3& a, const Vector3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-
-float LengthSquared(const Vector3& v) { return v.x * v.x + v.y * v.y + v.z * v.z; }
-
-Vector3 Scale(const Vector3& v, float s) { return {v.x * s, v.y * s, v.z * s}; }
-
-Vector3 Project(const Vector3& v1, const Vector3& v2) {
-	float d = Dot(v1, v2);
-	float len2 = LengthSquared(v2);
-	if (len2 < 1e-6f)
-		return {0, 0, 0};
-	return Scale(v2, d / len2);
-}
-
-Vector3 ClosestPoint(const Vector3& point, const Segment& segment) {
-	Vector3 toPoint = Subtract(point, segment.origin);
-	float len2 = LengthSquared(segment.diff);
-	if (len2 < 1e-6f)
-		return segment.origin;
-	float t = Dot(toPoint, segment.diff) / len2;
-	t = fmaxf(0.0f, fminf(1.0f, t));
-	return Add(segment.origin, Scale(segment.diff, t));
+bool IsCollision(const Sphere& s1, const Sphere& s2) {
+	float dx = s2.center.x - s1.center.x;
+	float dy = s2.center.y - s1.center.y;
+	float dz = s2.center.z - s1.center.z;
+	float distSq = dx * dx + dy * dy + dz * dz;
+	float radiusSum = s1.radius + s2.radius;
+	return distSq <= radiusSum * radiusSum;
 }
 
 Matrix4x4 Multiply(const Matrix4x4& a, const Matrix4x4& b) {
@@ -177,6 +158,7 @@ void DrawGrid(const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMa
 		uint32_t color = (i == kSubdivision / 2) ? 0x000000FF : 0xAAAAAAFF;
 		Novice::DrawLine((int)s.x, (int)s.y, (int)e.x, (int)e.y, color);
 	}
+
 	for (int i = 0; i <= kSubdivision; i++) {
 		float z = -kGridHalfWidth + kStep * i;
 		Vector3 start = {-kGridHalfWidth, 0.0f, z};
@@ -188,16 +170,31 @@ void DrawGrid(const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMa
 	}
 }
 
-void DrawSegment(const Segment& segment, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
-	Vector3 endPoint = Add(segment.origin, segment.diff);
-	Vector3 start = Transform(Transform(segment.origin, viewProjectionMatrix), viewportMatrix);
-	Vector3 end = Transform(Transform(endPoint, viewProjectionMatrix), viewportMatrix);
-	Novice::DrawLine((int)start.x, (int)start.y, (int)end.x, (int)end.y, color);
-}
+void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
+	const int kSubdivision = 16;
+	const float kLonStep = 2.0f * kPi / kSubdivision;
+	const float kLatStep = kPi / kSubdivision;
 
-void DrawPoint(const Vector3& point, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
-	Vector3 p = Transform(Transform(point, viewProjectionMatrix), viewportMatrix);
-	Novice::DrawEllipse((int)p.x, (int)p.y, 5, 5, 0.0f, color, kFillModeSolid);
+	for (int latIdx = 0; latIdx < kSubdivision; latIdx++) {
+		float lat0 = -kPi / 2.0f + kLatStep * latIdx;
+		float lat1 = lat0 + kLatStep;
+
+		for (int lonIdx = 0; lonIdx < kSubdivision; lonIdx++) {
+			float lon0 = kLonStep * lonIdx;
+			float lon1 = lon0 + kLonStep;
+
+			Vector3 a = {sphere.center.x + sphere.radius * cosf(lat0) * cosf(lon0), sphere.center.y + sphere.radius * sinf(lat0), sphere.center.z + sphere.radius * cosf(lat0) * sinf(lon0)};
+			Vector3 b = {sphere.center.x + sphere.radius * cosf(lat1) * cosf(lon0), sphere.center.y + sphere.radius * sinf(lat1), sphere.center.z + sphere.radius * cosf(lat1) * sinf(lon0)};
+			Vector3 c = {sphere.center.x + sphere.radius * cosf(lat0) * cosf(lon1), sphere.center.y + sphere.radius * sinf(lat0), sphere.center.z + sphere.radius * cosf(lat0) * sinf(lon1)};
+
+			Vector3 sa = Transform(Transform(a, viewProjectionMatrix), viewportMatrix);
+			Vector3 sb = Transform(Transform(b, viewProjectionMatrix), viewportMatrix);
+			Vector3 sc = Transform(Transform(c, viewProjectionMatrix), viewportMatrix);
+
+			Novice::DrawLine((int)sa.x, (int)sa.y, (int)sb.x, (int)sb.y, color);
+			Novice::DrawLine((int)sa.x, (int)sa.y, (int)sc.x, (int)sc.y, color);
+		}
+	}
 }
 
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -206,11 +203,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Vector3 cameraTranslate{0.0f, 1.9f, -6.49f};
 	Vector3 cameraRotate{0.26f, 0.0f, 0.0f};
 
-	Segment segment{
-	    {-2.0f, -1.0f, 0.0f},
-        {5.0f,  3.0f,  2.0f}
-    };
-	Vector3 point{-1.5f, 0.6f, 0.6f};
+	Sphere spheres[2];
+	spheres[0].center = {0.0f, 0.0f, 0.0f};
+	spheres[0].radius = 0.8f;
+	spheres[1].center = {1.0f, 0.0f, 0.0f};
+	spheres[1].radius = 0.5f;
 
 	char keys[256] = {0};
 	char preKeys[256] = {0};
@@ -225,14 +222,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		/// ↓更新処理ここから
 		///
 
-		Vector3 project = Project(Subtract(point, segment.origin), segment.diff);
-		Vector3 closestPoint = ClosestPoint(point, segment);
-
 		ImGui::Begin("Window");
-		ImGui::DragFloat3("Point", &point.x, 0.01f);
-		ImGui::DragFloat3("Segment origin", &segment.origin.x, 0.01f);
-		ImGui::DragFloat3("Segment diff", &segment.diff.x, 0.01f);
-		ImGui::InputFloat3("Project", &project.x, "%.3f", ImGuiInputTextFlags_ReadOnly);
+		ImGui::DragFloat3("CameraTranslate", &cameraTranslate.x, 0.01f);
+		ImGui::DragFloat3("CameraRotate", &cameraRotate.x, 0.01f);
+		
+		ImGui::DragFloat3("Sphere[0].Center", &spheres[0].center.x, 0.01f);
+		ImGui::DragFloat("Sphere[0].Radius", &spheres[0].radius, 0.01f);
+		ImGui::DragFloat3("Sphere[1].Center", &spheres[1].center.x, 0.01f);
+		ImGui::DragFloat("Sphere[1].Radius", &spheres[1].radius, 0.01f);
 		ImGui::End();
 
 		Matrix4x4 cameraRotateMatrix = Multiply(Multiply(MakeRotateXMatrix(cameraRotate.x), MakeRotateYMatrix(cameraRotate.y)), MakeRotateZMatrix(cameraRotate.z));
@@ -241,6 +238,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		Matrix4x4 projectionMatrix = MakePerspectiveFovMatrix(0.45f, float(kWindowWidth) / float(kWindowHeight), 0.1f, 100.0f);
 		Matrix4x4 viewProjectionMatrix = Multiply(viewMatrix, projectionMatrix);
 		Matrix4x4 viewportMatrix = MakeViewportMatrix(0, 0, float(kWindowWidth), float(kWindowHeight), 0.0f, 1.0f);
+
+		bool collision = IsCollision(spheres[0], spheres[1]);
 
 		///
 		/// ↑更新処理ここまで
@@ -251,9 +250,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
-		DrawSegment(segment, viewProjectionMatrix, viewportMatrix, 0xFFFFFFFF);
-		DrawPoint(point, viewProjectionMatrix, viewportMatrix, 0xFF0000FF);        
-		DrawPoint(closestPoint, viewProjectionMatrix, viewportMatrix, 0x000000FF); 
+		uint32_t color = collision ? 0xFF0000FF : 0xFFFFFFFF;
+		DrawSphere(spheres[0], viewProjectionMatrix, viewportMatrix, color);
+		DrawSphere(spheres[1], viewProjectionMatrix, viewportMatrix, color);
 
 		///
 		/// ↑描画処理ここまで
