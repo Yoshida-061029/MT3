@@ -20,13 +20,19 @@ struct Matrix4x4 {
 };
 
 struct AABB {
-	Vector3 min; 
-	Vector3 max; 
+	Vector3 min;
+	Vector3 max;
 };
 
 struct Sphere {
 	Vector3 center;
 	float radius;
+};
+
+
+struct Segment {
+	Vector3 origin;
+	Vector3 diff; 
 };
 
 Vector3 Subtract(const Vector3& a, const Vector3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -180,17 +186,47 @@ bool IsCollision(const AABB& aabb, const AABB& aabb2) {
 	return (aabb.min.x <= aabb2.max.x && aabb.max.x >= aabb2.min.x) && (aabb.min.y <= aabb2.max.y && aabb.max.y >= aabb2.min.y) && (aabb.min.z <= aabb2.max.z && aabb.max.z >= aabb2.min.z);
 }
 
-
 bool IsCollision(const AABB& aabb, const Sphere& sphere) {
-	
 	Vector3 closestPoint = {
 	    std::clamp(sphere.center.x, aabb.min.x, aabb.max.x),
 	    std::clamp(sphere.center.y, aabb.min.y, aabb.max.y),
 	    std::clamp(sphere.center.z, aabb.min.z, aabb.max.z),
 	};
-	
 	float distSq = LengthSquared(Subtract(closestPoint, sphere.center));
 	return distSq <= sphere.radius * sphere.radius;
+}
+
+
+bool IsCollision(const AABB& aabb, const Segment& segment) {
+	
+	float tMin = 0.0f;
+	float tMax = 1.0f;
+
+	float dirs[3] = {segment.diff.x, segment.diff.y, segment.diff.z};
+	float origins[3] = {segment.origin.x, segment.origin.y, segment.origin.z};
+	float mins[3] = {aabb.min.x, aabb.min.y, aabb.min.z};
+	float maxs[3] = {aabb.max.x, aabb.max.y, aabb.max.z};
+
+	for (int i = 0; i < 3; i++) {
+		if (fabsf(dirs[i]) < 1e-6f) {
+		
+			if (origins[i] < mins[i] || origins[i] > maxs[i]) {
+				return false;
+			}
+		} else {
+			float t1 = (mins[i] - origins[i]) / dirs[i];
+			float t2 = (maxs[i] - origins[i]) / dirs[i];
+			if (t1 > t2)
+				std::swap(t1, t2);
+			tMin = (std::max)(tMin, t1);
+			tMax = (std::min)(tMax, t2);
+			if (tMin > tMax) {
+				return false;
+			}
+		}
+	}
+	
+	return tMin <= tMax;
 }
 
 void DrawAABB(const AABB& aabb, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
@@ -210,7 +246,6 @@ void DrawAABB(const AABB& aabb, const Matrix4x4& viewProjectionMatrix, const Mat
 		screen[i] = Transform(Transform(vertices[i], viewProjectionMatrix), viewportMatrix);
 	}
 
-	
 	Novice::DrawLine((int)screen[0].x, (int)screen[0].y, (int)screen[1].x, (int)screen[1].y, color);
 	Novice::DrawLine((int)screen[0].x, (int)screen[0].y, (int)screen[2].x, (int)screen[2].y, color);
 	Novice::DrawLine((int)screen[1].x, (int)screen[1].y, (int)screen[3].x, (int)screen[3].y, color);
@@ -220,49 +255,22 @@ void DrawAABB(const AABB& aabb, const Matrix4x4& viewProjectionMatrix, const Mat
 	Novice::DrawLine((int)screen[4].x, (int)screen[4].y, (int)screen[6].x, (int)screen[6].y, color);
 	Novice::DrawLine((int)screen[5].x, (int)screen[5].y, (int)screen[7].x, (int)screen[7].y, color);
 	Novice::DrawLine((int)screen[6].x, (int)screen[6].y, (int)screen[7].x, (int)screen[7].y, color);
-	
+
 	Novice::DrawLine((int)screen[0].x, (int)screen[0].y, (int)screen[4].x, (int)screen[4].y, color);
 	Novice::DrawLine((int)screen[1].x, (int)screen[1].y, (int)screen[5].x, (int)screen[5].y, color);
 	Novice::DrawLine((int)screen[2].x, (int)screen[2].y, (int)screen[6].x, (int)screen[6].y, color);
 	Novice::DrawLine((int)screen[3].x, (int)screen[3].y, (int)screen[7].x, (int)screen[7].y, color);
 }
 
-void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
-	const int kSubdivision = 16;
-	const float kLatStep = kPi / kSubdivision;
-	const float kLonStep = 2.0f * kPi / kSubdivision;
+// 線分を描画する関数
+void DrawSegment(const Segment& segment, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
+	Vector3 start = segment.origin;
+	Vector3 end = Add(segment.origin, segment.diff);
 
-	for (int lat = 0; lat < kSubdivision; lat++) {
-		float theta1 = -kPi / 2.0f + lat * kLatStep;
-		float theta2 = theta1 + kLatStep;
-		for (int lon = 0; lon < kSubdivision; lon++) {
-			float phi1 = lon * kLonStep;
-			float phi2 = phi1 + kLonStep;
+	Vector3 sScreen = Transform(Transform(start, viewProjectionMatrix), viewportMatrix);
+	Vector3 eScreen = Transform(Transform(end, viewProjectionMatrix), viewportMatrix);
 
-			Vector3 a = {
-			    sphere.center.x + sphere.radius * cosf(theta1) * cosf(phi1),
-			    sphere.center.y + sphere.radius * sinf(theta1),
-			    sphere.center.z + sphere.radius * cosf(theta1) * sinf(phi1),
-			};
-			Vector3 b = {
-			    sphere.center.x + sphere.radius * cosf(theta2) * cosf(phi1),
-			    sphere.center.y + sphere.radius * sinf(theta2),
-			    sphere.center.z + sphere.radius * cosf(theta2) * sinf(phi1),
-			};
-			Vector3 c = {
-			    sphere.center.x + sphere.radius * cosf(theta1) * cosf(phi2),
-			    sphere.center.y + sphere.radius * sinf(theta1),
-			    sphere.center.z + sphere.radius * cosf(theta1) * sinf(phi2),
-			};
-
-			Vector3 sa = Transform(Transform(a, viewProjectionMatrix), viewportMatrix);
-			Vector3 sb = Transform(Transform(b, viewProjectionMatrix), viewportMatrix);
-			Vector3 sc = Transform(Transform(c, viewProjectionMatrix), viewportMatrix);
-
-			Novice::DrawLine((int)sa.x, (int)sa.y, (int)sb.x, (int)sb.y, color);
-			Novice::DrawLine((int)sa.x, (int)sa.y, (int)sc.x, (int)sc.y, color);
-		}
-	}
+	Novice::DrawLine((int)sScreen.x, (int)sScreen.y, (int)eScreen.x, (int)eScreen.y, color);
 }
 
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -273,11 +281,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	AABB aabb{
 	    .min = {-0.5f, -0.5f, -0.5f},
-	    .max = {0.0f,  0.0f,  0.0f },
+	    .max = {0.5f,  0.5f,  0.5f },
 	};
-	Sphere sphere{
-	    .center = {0.0f, 0.0f, 0.0f},
-	    .radius = 0.5f,
+	Segment segment{
+	    .origin = {-0.7f, 0.3f,  0.0f},
+	    .diff = {2.0f,  -0.5f, 0.0f},
 	};
 
 	char keys[256] = {0};
@@ -296,8 +304,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		ImGui::Begin("Window");
 		ImGui::DragFloat3("aabb.min", &aabb.min.x, 0.01f);
 		ImGui::DragFloat3("aabb.max", &aabb.max.x, 0.01f);
-		ImGui::DragFloat3("sphere.center", &sphere.center.x, 0.01f);
-		ImGui::DragFloat("sphere.radius", &sphere.radius, 0.01f);
+		ImGui::DragFloat3("segment.origin", &segment.origin.x, 0.01f);
+		ImGui::DragFloat3("segment.diff", &segment.diff.x, 0.01f);
 		ImGui::End();
 
 		aabb.min.x = (std::min)(aabb.min.x, aabb.max.x);
@@ -314,7 +322,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		Matrix4x4 viewProjectionMatrix = Multiply(viewMatrix, projectionMatrix);
 		Matrix4x4 viewportMatrix = MakeViewportMatrix(0, 0, float(kWindowWidth), float(kWindowHeight), 0.0f, 1.0f);
 
-		bool collision = IsCollision(aabb, sphere);
+		bool collision = IsCollision(aabb, segment);
 		uint32_t color = collision ? 0xFF0000FF : 0xFFFFFFFF;
 
 		///
@@ -327,7 +335,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
 		DrawAABB(aabb, viewProjectionMatrix, viewportMatrix, color);
-		DrawSphere(sphere, viewProjectionMatrix, viewportMatrix, color);
+		DrawSegment(segment, viewProjectionMatrix, viewportMatrix, color);
 
 		///
 		/// ↑描画処理ここまで
