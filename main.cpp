@@ -24,7 +24,6 @@ struct AABB {
 	Vector3 max; 
 };
 
-// ★追加
 struct Sphere {
 	Vector3 center;
 	float radius;
