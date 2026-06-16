@@ -1,12 +1,13 @@
 #define _USE_MATH_DEFINES
 #include <Novice.h>
+#include <algorithm>
 #include <cmath>
 #include <imgui.h>
 #include <stdio.h>
 
 const char kWindowTitle[] = "GC2C_08_ヨシダ_ハルキ";
-const int kWindowWidth = 1280;
 const int kWindowHeight = 720;
+const int kWindowWidth = 1280;
 
 constexpr float kPi = 3.14159265358979323846f;
 
@@ -18,14 +19,26 @@ struct Matrix4x4 {
 	float m[4][4];
 };
 
+struct AABB {
+	Vector3 min;
+	Vector3 max;
+};
+
+struct Sphere {
+	Vector3 center;
+	float radius;
+};
+
 struct Segment {
 	Vector3 origin;
 	Vector3 diff;
 };
 
-struct Plane {
-	Vector3 normal;
-	float distance;
+// OBB構造体
+struct OBB {
+	Vector3 center;
+	Vector3 orientations[3]; // 各軸の方向ベクトル（正規化済み）
+	Vector3 size;            // 各軸方向の半径
 };
 
 Vector3 Subtract(const Vector3& a, const Vector3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -43,43 +56,6 @@ Vector3 Normalize(const Vector3& v) {
 }
 
 Vector3 Cross(const Vector3& a, const Vector3& b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
-
-Vector3 Perpendicular(const Vector3& v) {
-	if (v.x != 0.0f || v.y != 0.0f)
-		return {-v.y, v.x, 0.0f};
-	return {0.0f, -v.z, v.y};
-}
-
-Vector3 Project(const Vector3& v1, const Vector3& v2) {
-	float d = Dot(v1, v2);
-	float len2 = LengthSquared(v2);
-	if (len2 < 1e-6f)
-		return {0, 0, 0};
-	return Scale(v2, d / len2);
-}
-
-Vector3 ClosestPoint(const Vector3& point, const Segment& segment) {
-	Vector3 toPoint = Subtract(point, segment.origin);
-	float len2 = LengthSquared(segment.diff);
-	if (len2 < 1e-6f)
-		return segment.origin;
-	float t = Dot(toPoint, segment.diff) / len2;
-	t = fmaxf(0.0f, fminf(1.0f, t));
-	return Add(segment.origin, Scale(segment.diff, t));
-}
-
-
-bool IsCollision(const Segment& segment, const Plane& plane) {
-	
-	float dot = Dot(plane.normal, segment.diff);
-	
-	if (fabsf(dot) < 1e-6f)
-		return false;
-	
-	float t = (plane.distance - Dot(plane.normal, segment.origin)) / dot;
-	
-	return t >= 0.0f && t <= 1.0f;
-}
 
 Matrix4x4 Multiply(const Matrix4x4& a, const Matrix4x4& b) {
 	Matrix4x4 result = {};
@@ -212,30 +188,104 @@ void DrawGrid(const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMa
 	}
 }
 
-void DrawSegment(const Segment& segment, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
-	Vector3 endPoint = Add(segment.origin, segment.diff);
-	Vector3 start = Transform(Transform(segment.origin, viewProjectionMatrix), viewportMatrix);
-	Vector3 end = Transform(Transform(endPoint, viewProjectionMatrix), viewportMatrix);
-	Novice::DrawLine((int)start.x, (int)start.y, (int)end.x, (int)end.y, color);
+// OBBと線分の衝突判定
+// セグメントをOBBのローカル空間に変換し、AABBとの判定に帰着させる
+bool IsCollision(const Segment& segment, const OBB& obb) {
+	// セグメントの始点をOBBのローカル空間へ変換
+	Vector3 d = Subtract(segment.origin, obb.center);
+
+	// ローカル空間での始点・方向ベクトルの各軸成分を求める
+	float localOrigin[3] = {
+	    Dot(d, obb.orientations[0]),
+	    Dot(d, obb.orientations[1]),
+	    Dot(d, obb.orientations[2]),
+	};
+	float localDiff[3] = {
+	    Dot(segment.diff, obb.orientations[0]),
+	    Dot(segment.diff, obb.orientations[1]),
+	    Dot(segment.diff, obb.orientations[2]),
+	};
+	float size[3] = {obb.size.x, obb.size.y, obb.size.z};
+
+	// ローカル空間でAABB [-size, +size] との線分判定（スラブ法）
+	float tMin = 0.0f;
+	float tMax = 1.0f;
+
+	for (int i = 0; i < 3; i++) {
+		if (fabsf(localDiff[i]) < 1e-6f) {
+			// 方向がない軸：始点がスラブ外なら非衝突
+			if (localOrigin[i] < -size[i] || localOrigin[i] > size[i]) {
+				return false;
+			}
+		} else {
+			float t1 = (-size[i] - localOrigin[i]) / localDiff[i];
+			float t2 = (size[i] - localOrigin[i]) / localDiff[i];
+			if (t1 > t2)
+				std::swap(t1, t2);
+			tMin = (std::max)(tMin, t1);
+			tMax = (std::min)(tMax, t2);
+			if (tMin > tMax) {
+				return false;
+			}
+		}
+	}
+
+	return tMin <= tMax;
 }
 
-void DrawPlane(const Plane& plane, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
-	Vector3 center = Scale(plane.normal, plane.distance);
-	Vector3 perps[4];
-	perps[0] = Normalize(Perpendicular(plane.normal));
-	perps[1] = {-perps[0].x, -perps[0].y, -perps[0].z};
-	perps[2] = Cross(plane.normal, perps[0]);
-	perps[3] = {-perps[2].x, -perps[2].y, -perps[2].z};
+// OBBを描画する関数
+void DrawOBB(const OBB& obb, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
+	// OBBの8頂点をワールド空間で計算
+	Vector3 axes[3] = {
+	    Scale(obb.orientations[0], obb.size.x),
+	    Scale(obb.orientations[1], obb.size.y),
+	    Scale(obb.orientations[2], obb.size.z),
+	};
 
-	Vector3 points[4];
-	for (int i = 0; i < 4; i++) {
-		Vector3 point = Add(center, Scale(perps[i], 2.0f));
-		points[i] = Transform(Transform(point, viewProjectionMatrix), viewportMatrix);
+	// 8頂点 = center ± axes[0] ± axes[1] ± axes[2]
+	Vector3 v[8];
+	for (int i = 0; i < 8; i++) {
+		v[i] = obb.center;
+		v[i] = Add(v[i], Scale(axes[0], (i & 1) ? 1.0f : -1.0f));
+		v[i] = Add(v[i], Scale(axes[1], (i & 2) ? 1.0f : -1.0f));
+		v[i] = Add(v[i], Scale(axes[2], (i & 4) ? 1.0f : -1.0f));
 	}
-	Novice::DrawLine((int)points[0].x, (int)points[0].y, (int)points[2].x, (int)points[2].y, color);
-	Novice::DrawLine((int)points[2].x, (int)points[2].y, (int)points[1].x, (int)points[1].y, color);
-	Novice::DrawLine((int)points[1].x, (int)points[1].y, (int)points[3].x, (int)points[3].y, color);
-	Novice::DrawLine((int)points[3].x, (int)points[3].y, (int)points[0].x, (int)points[0].y, color);
+
+	// スクリーン座標に変換
+	Vector3 s[8];
+	for (int i = 0; i < 8; i++) {
+		s[i] = Transform(Transform(v[i], viewProjectionMatrix), viewportMatrix);
+	}
+
+	// 12本のエッジを描画
+	int edges[12][2] = {
+	    {0, 1},
+        {2, 3},
+        {4, 5},
+        {6, 7}, // X方向
+	    {0, 2},
+        {1, 3},
+        {4, 6},
+        {5, 7}, // Y方向
+	    {0, 4},
+        {1, 5},
+        {2, 6},
+        {3, 7}, // Z方向
+	};
+	for (auto& e : edges) {
+		Novice::DrawLine((int)s[e[0]].x, (int)s[e[0]].y, (int)s[e[1]].x, (int)s[e[1]].y, color);
+	}
+}
+
+// 線分を描画する関数
+void DrawSegment(const Segment& segment, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
+	Vector3 start = segment.origin;
+	Vector3 end = Add(segment.origin, segment.diff);
+
+	Vector3 sScreen = Transform(Transform(start, viewProjectionMatrix), viewportMatrix);
+	Vector3 eScreen = Transform(Transform(end, viewProjectionMatrix), viewportMatrix);
+
+	Novice::DrawLine((int)sScreen.x, (int)sScreen.y, (int)eScreen.x, (int)eScreen.y, color);
 }
 
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
@@ -244,14 +294,24 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Vector3 cameraTranslate{0.0f, 1.9f, -6.49f};
 	Vector3 cameraRotate{0.26f, 0.0f, 0.0f};
 
-	Segment segment{
-	    {-0.69f, 0.33f, 0.0f},
-        {0.07f,  0.58f, 0.0f}
-    };
+	// ImGuiで制御する回転角（度数法）
+	Vector3 rotate{0.0f, 0.0f, 0.0f};
 
-	Plane plane;
-	plane.normal = Normalize({-0.336f, 0.942f, 0.0f});
-	plane.distance = 1.0f;
+	OBB obb{
+	    .center = {-1.0f, 0.0f, 0.0f},
+	    .orientations =
+	        {
+	               {1.0f, 0.0f, 0.0f},
+	               {0.0f, 1.0f, 0.0f},
+	               {0.0f, 0.0f, 1.0f},
+	               },
+	    .size = {0.5f, 0.5f, 0.5f},
+	};
+
+	Segment segment{
+	    .origin = {-0.8f, -0.3f, 0.0f},
+	    .diff = {0.5f,  0.5f,  0.5f},
+	};
 
 	char keys[256] = {0};
 	char preKeys[256] = {0};
@@ -267,12 +327,28 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		ImGui::Begin("Window");
-		ImGui::DragFloat3("Plane.Normal", &plane.normal.x, 0.01f);
-		plane.normal = Normalize(plane.normal); // ★必ずNormalize
-		ImGui::DragFloat("Plane.Distance", &plane.distance, 0.01f);
-		ImGui::DragFloat3("Segment.Origin", &segment.origin.x, 0.01f);
-		ImGui::DragFloat3("Segment.Diff", &segment.diff.x, 0.01f);
+		ImGui::DragFloat3("obb.center", &obb.center.x, 0.01f);
+		ImGui::DragFloat("rotateX", &rotate.x, 1.0f); // 度数法で入力
+		ImGui::DragFloat("rotateY", &rotate.y, 1.0f);
+		ImGui::DragFloat("rotateZ", &rotate.z, 1.0f);
+		ImGui::DragFloat3("obb.orientations[0]", &obb.orientations[0].x, 0.01f);
+		ImGui::DragFloat3("obb.orientations[1]", &obb.orientations[1].x, 0.01f);
+		ImGui::DragFloat3("obb.orientations[2]", &obb.orientations[2].x, 0.01f);
+		ImGui::DragFloat3("obb.size", &obb.size.x, 0.01f);
+		ImGui::DragFloat3("segment.origin", &segment.origin.x, 0.01f);
+		ImGui::DragFloat3("segment.diff", &segment.diff.x, 0.01f);
 		ImGui::End();
+
+		// 回転角（度）をラジアンに変換してOBBの向きを更新
+		float rx = rotate.x * kPi / 180.0f;
+		float ry = rotate.y * kPi / 180.0f;
+		float rz = rotate.z * kPi / 180.0f;
+		Matrix4x4 rotMat = Multiply(Multiply(MakeRotateXMatrix(rx), MakeRotateYMatrix(ry)), MakeRotateZMatrix(rz));
+
+		// 基底ベクトルに回転を適用
+		obb.orientations[0] = Normalize({rotMat.m[0][0], rotMat.m[0][1], rotMat.m[0][2]});
+		obb.orientations[1] = Normalize({rotMat.m[1][0], rotMat.m[1][1], rotMat.m[1][2]});
+		obb.orientations[2] = Normalize({rotMat.m[2][0], rotMat.m[2][1], rotMat.m[2][2]});
 
 		Matrix4x4 cameraRotateMatrix = Multiply(Multiply(MakeRotateXMatrix(cameraRotate.x), MakeRotateYMatrix(cameraRotate.y)), MakeRotateZMatrix(cameraRotate.z));
 		Matrix4x4 cameraMatrix = Multiply(cameraRotateMatrix, MakeTranslateMatrix(cameraTranslate));
@@ -281,7 +357,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		Matrix4x4 viewProjectionMatrix = Multiply(viewMatrix, projectionMatrix);
 		Matrix4x4 viewportMatrix = MakeViewportMatrix(0, 0, float(kWindowWidth), float(kWindowHeight), 0.0f, 1.0f);
 
-		bool collision = IsCollision(segment, plane);
+		bool collision = IsCollision(segment, obb);
+		uint32_t color = collision ? 0xFF0000FF : 0xFFFFFFFF;
 
 		///
 		/// ↑更新処理ここまで
@@ -292,9 +369,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
-		DrawPlane(plane, viewProjectionMatrix, viewportMatrix, 0xFFFFFFFF);
-		uint32_t segColor = collision ? 0xFF0000FF : 0xFFFFFFFF;
-		DrawSegment(segment, viewProjectionMatrix, viewportMatrix, segColor);
+		DrawOBB(obb, viewProjectionMatrix, viewportMatrix, color);
+		DrawSegment(segment, viewProjectionMatrix, viewportMatrix, color);
 
 		///
 		/// ↑描画処理ここまで
