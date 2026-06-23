@@ -19,10 +19,9 @@ struct Matrix4x4 {
 	float m[4][4];
 };
 
-struct OBB {
+struct Sphere {
 	Vector3 center;
-	Vector3 orientations[3];
-	Vector3 size;
+	float radius;
 };
 
 Vector3 Subtract(const Vector3& a, const Vector3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -39,7 +38,8 @@ Vector3 Normalize(const Vector3& v) {
 	return {v.x / len, v.y / len, v.z / len};
 }
 
-Vector3 Cross(const Vector3& a, const Vector3& b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+// 線形補間（2次ベジェ曲線の実装に必要）
+Vector3 Lerp(const Vector3& v1, const Vector3& v2, float t) { return Add(Scale(v1, 1.0f - t), Scale(v2, t)); }
 
 Matrix4x4 Multiply(const Matrix4x4& a, const Matrix4x4& b) {
 	Matrix4x4 result = {};
@@ -172,99 +172,66 @@ void DrawGrid(const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMa
 	}
 }
 
-// OBBとOBBの衝突判定（分離軸定理 SAT）
-bool IsCollision(const OBB& obb1, const OBB& obb2) {
-	// 2つのOBBの中心間ベクトル
-	Vector3 d = Subtract(obb2.center, obb1.center);
+// 球を緯線・経線のワイヤーフレームで描画する関数（コントロールポイントの可視化用）
+void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
+	const int kSubdivision = 8;
+	const float kLonEvery = 2.0f * kPi / kSubdivision; // 経度方向の分割角度
+	const float kLatEvery = kPi / kSubdivision;        // 緯度方向の分割角度（-π/2 ～ π/2）
 
-	// サイズを配列で扱う
-	float s1[3] = {obb1.size.x, obb1.size.y, obb1.size.z};
-	float s2[3] = {obb2.size.x, obb2.size.y, obb2.size.z};
+	auto SpherePoint = [&](float lat, float lon) -> Vector3 {
+		return {
+		    sphere.center.x + sphere.radius * cosf(lat) * cosf(lon),
+		    sphere.center.y + sphere.radius * sinf(lat),
+		    sphere.center.z + sphere.radius * cosf(lat) * sinf(lon),
+		};
+	};
 
-	// 分離軸候補：obb1の3軸、obb2の3軸、それらのクロス積9軸 = 計15軸
-	Vector3 axes[15];
-	// obb1の軸
-	axes[0] = obb1.orientations[0];
-	axes[1] = obb1.orientations[1];
-	axes[2] = obb1.orientations[2];
-	// obb2の軸
-	axes[3] = obb2.orientations[0];
-	axes[4] = obb2.orientations[1];
-	axes[5] = obb2.orientations[2];
-	// クロス積軸
-	int idx = 6;
-	for (int i = 0; i < 3; i++) {
-		for (int j = 0; j < 3; j++) {
-			axes[idx++] = Cross(obb1.orientations[i], obb2.orientations[j]);
+	// 緯線（横方向の円）
+	for (int latIndex = 0; latIndex <= kSubdivision; latIndex++) {
+		float lat = -kPi / 2.0f + kLatEvery * latIndex;
+		for (int lonIndex = 0; lonIndex < kSubdivision; lonIndex++) {
+			float lon0 = lonIndex * kLonEvery;
+			float lon1 = (lonIndex + 1) * kLonEvery;
+			Vector3 a = SpherePoint(lat, lon0);
+			Vector3 b = SpherePoint(lat, lon1);
+			Vector3 sA = Transform(Transform(a, viewProjectionMatrix), viewportMatrix);
+			Vector3 sB = Transform(Transform(b, viewProjectionMatrix), viewportMatrix);
+			Novice::DrawLine((int)sA.x, (int)sA.y, (int)sB.x, (int)sB.y, color);
 		}
 	}
-
-	for (int a = 0; a < 15; a++) {
-		// ゼロベクトルのクロス積軸はスキップ
-		if (LengthSquared(axes[a]) < 1e-10f)
-			continue;
-
-		Vector3 axis = Normalize(axes[a]);
-
-		// 中心間距離をこの軸に投影
-		float dist = fabsf(Dot(d, axis));
-
-		// obb1の投影半径
-		float r1 = 0.0f;
-		for (int i = 0; i < 3; i++)
-			r1 += fabsf(Dot(obb1.orientations[i], axis)) * s1[i];
-
-		// obb2の投影半径
-		float r2 = 0.0f;
-		for (int i = 0; i < 3; i++)
-			r2 += fabsf(Dot(obb2.orientations[i], axis)) * s2[i];
-
-		// 分離軸が見つかれば非衝突
-		if (dist > r1 + r2)
-			return false;
+	// 経線（縦方向の円）
+	for (int lonIndex = 0; lonIndex < kSubdivision; lonIndex++) {
+		float lon = lonIndex * kLonEvery;
+		for (int latIndex = 0; latIndex < kSubdivision; latIndex++) {
+			float lat0 = -kPi / 2.0f + kLatEvery * latIndex;
+			float lat1 = -kPi / 2.0f + kLatEvery * (latIndex + 1);
+			Vector3 a = SpherePoint(lat0, lon);
+			Vector3 b = SpherePoint(lat1, lon);
+			Vector3 sA = Transform(Transform(a, viewProjectionMatrix), viewportMatrix);
+			Vector3 sB = Transform(Transform(b, viewProjectionMatrix), viewportMatrix);
+			Novice::DrawLine((int)sA.x, (int)sA.y, (int)sB.x, (int)sB.y, color);
+		}
 	}
-
-	// すべての軸で重なり → 衝突
-	return true;
 }
 
-// OBBを描画する関数
-void DrawOBB(const OBB& obb, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
-	Vector3 axes[3] = {
-	    Scale(obb.orientations[0], obb.size.x),
-	    Scale(obb.orientations[1], obb.size.y),
-	    Scale(obb.orientations[2], obb.size.z),
-	};
+// 2次ベジェ曲線の描画関数（De Casteljauのアルゴリズムを線分近似で描画）
+void DrawBezier(const Vector3& controlPoint0, const Vector3& controlPoint1, const Vector3& controlPoint2, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
+	const int kSegmentCount = 32; // 曲線を近似する分割数
+	Vector3 prevPoint = controlPoint0;
 
-	Vector3 v[8];
-	for (int i = 0; i < 8; i++) {
-		v[i] = obb.center;
-		v[i] = Add(v[i], Scale(axes[0], (i & 1) ? 1.0f : -1.0f));
-		v[i] = Add(v[i], Scale(axes[1], (i & 2) ? 1.0f : -1.0f));
-		v[i] = Add(v[i], Scale(axes[2], (i & 4) ? 1.0f : -1.0f));
-	}
+	for (int i = 1; i <= kSegmentCount; i++) {
+		float t = float(i) / float(kSegmentCount);
 
-	Vector3 s[8];
-	for (int i = 0; i < 8; i++) {
-		s[i] = Transform(Transform(v[i], viewProjectionMatrix), viewportMatrix);
-	}
+		// p0-p1, p1-p2 をそれぞれ補間し、その結果同士をさらに補間する
+		Vector3 p0p1 = Lerp(controlPoint0, controlPoint1, t);
+		Vector3 p1p2 = Lerp(controlPoint1, controlPoint2, t);
+		Vector3 point = Lerp(p0p1, p1p2, t);
 
-	int edges[12][2] = {
-	    {0, 1},
-        {2, 3},
-        {4, 5},
-        {6, 7},
-        {0, 2},
-        {1, 3},
-        {4, 6},
-        {5, 7},
-        {0, 4},
-        {1, 5},
-        {2, 6},
-        {3, 7},
-	};
-	for (auto& e : edges) {
-		Novice::DrawLine((int)s[e[0]].x, (int)s[e[0]].y, (int)s[e[1]].x, (int)s[e[1]].y, color);
+		Vector3 s0 = Transform(Transform(prevPoint, viewProjectionMatrix), viewportMatrix);
+		Vector3 s1 = Transform(Transform(point, viewProjectionMatrix), viewportMatrix);
+		Novice::DrawLine((int)s0.x, (int)s0.y, (int)s1.x, (int)s1.y, color);
+
+		prevPoint = point;
 	}
 }
 
@@ -274,30 +241,11 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Vector3 cameraTranslate{0.0f, 1.9f, -6.49f};
 	Vector3 cameraRotate{0.26f, 0.0f, 0.0f};
 
-	// ImGuiで操作する回転角（度数法）
-	Vector3 rotate1{0.0f, 0.0f, 0.0f};
-	Vector3 rotate2{-0.05f, -2.49f, 0.15f};
-
-	OBB obb1{
-	    .center = {0.0f, 0.0f, 0.0f},
-	    .orientations =
-	        {
-	               {1.0f, 0.0f, 0.0f},
-	               {0.0f, 1.0f, 0.0f},
-	               {0.0f, 0.0f, 1.0f},
-	               },
-	    .size = {0.83f, 0.26f, 0.24f},
-	};
-
-	OBB obb2{
-	    .center = {0.9f, 0.66f, 0.78f},
-	    .orientations =
-	        {
-	               {1.0f, 0.0f, 0.0f},
-	               {0.0f, 1.0f, 0.0f},
-	               {0.0f, 0.0f, 1.0f},
-	               },
-	    .size = {0.5f, 0.37f, 0.5f},
+	// 実装例の初期値（スライド指定）
+	Vector3 controlPoints[3] = {
+	    {-0.8f, 0.58f, 1.0f },
+	    {1.76f, 1.0f,  -0.3f},
+	    {0.94f, -0.7f, 2.3f },
 	};
 
 	char keys[256] = {0};
@@ -314,31 +262,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		ImGui::Begin("Window");
-		ImGui::DragFloat3("obb1.center", &obb1.center.x, 0.01f);
-		ImGui::DragFloat("obb1.rotateX", &rotate1.x, 1.0f);
-		ImGui::DragFloat("obb1.rotateY", &rotate1.y, 1.0f);
-		ImGui::DragFloat("obb1.rotateZ", &rotate1.z, 1.0f);
-		ImGui::DragFloat3("obb1.size", &obb1.size.x, 0.01f);
-		ImGui::DragFloat3("obb2.center", &obb2.center.x, 0.01f);
-		ImGui::DragFloat("obb2.rotateX", &rotate2.x, 1.0f);
-		ImGui::DragFloat("obb2.rotateY", &rotate2.y, 1.0f);
-		ImGui::DragFloat("obb2.rotateZ", &rotate2.z, 1.0f);
-		ImGui::DragFloat3("obb2.size", &obb2.size.x, 0.01f);
+		ImGui::DragFloat3("controlPoints[0]", &controlPoints[0].x, 0.01f);
+		ImGui::DragFloat3("controlPoints[1]", &controlPoints[1].x, 0.01f);
+		ImGui::DragFloat3("controlPoints[2]", &controlPoints[2].x, 0.01f);
 		ImGui::End();
-
-		// 回転行列からorientationsを更新
-		auto UpdateOBBOrientation = [&](OBB& obb, const Vector3& rotate) {
-			float rx = rotate.x * kPi / 180.0f;
-			float ry = rotate.y * kPi / 180.0f;
-			float rz = rotate.z * kPi / 180.0f;
-			Matrix4x4 rotMat = Multiply(Multiply(MakeRotateXMatrix(rx), MakeRotateYMatrix(ry)), MakeRotateZMatrix(rz));
-			obb.orientations[0] = Normalize({rotMat.m[0][0], rotMat.m[0][1], rotMat.m[0][2]});
-			obb.orientations[1] = Normalize({rotMat.m[1][0], rotMat.m[1][1], rotMat.m[1][2]});
-			obb.orientations[2] = Normalize({rotMat.m[2][0], rotMat.m[2][1], rotMat.m[2][2]});
-		};
-
-		UpdateOBBOrientation(obb1, rotate1);
-		UpdateOBBOrientation(obb2, rotate2);
 
 		Matrix4x4 cameraRotateMatrix = Multiply(Multiply(MakeRotateXMatrix(cameraRotate.x), MakeRotateYMatrix(cameraRotate.y)), MakeRotateZMatrix(cameraRotate.z));
 		Matrix4x4 cameraMatrix = Multiply(cameraRotateMatrix, MakeTranslateMatrix(cameraTranslate));
@@ -346,9 +273,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		Matrix4x4 projectionMatrix = MakePerspectiveFovMatrix(0.45f, float(kWindowWidth) / float(kWindowHeight), 0.1f, 100.0f);
 		Matrix4x4 viewProjectionMatrix = Multiply(viewMatrix, projectionMatrix);
 		Matrix4x4 viewportMatrix = MakeViewportMatrix(0, 0, float(kWindowWidth), float(kWindowHeight), 0.0f, 1.0f);
-
-		bool collision = IsCollision(obb1, obb2);
-		uint32_t color = collision ? 0xFF0000FF : 0xFFFFFFFF;
 
 		///
 		/// ↑更新処理ここまで
@@ -359,8 +283,13 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
-		DrawOBB(obb1, viewProjectionMatrix, viewportMatrix, color);
-		DrawOBB(obb2, viewProjectionMatrix, viewportMatrix, color);
+		DrawBezier(controlPoints[0], controlPoints[1], controlPoints[2], viewProjectionMatrix, viewportMatrix, 0x0000FFFF);
+
+		// コントロールポイントを黒い球（半径0.01m）で描画
+		for (int i = 0; i < 3; i++) {
+			Sphere sphere{controlPoints[i], 0.01f};
+			DrawSphere(sphere, viewProjectionMatrix, viewportMatrix, 0x000000FF);
+		}
 
 		///
 		/// ↑描画処理ここまで
