@@ -38,9 +38,6 @@ Vector3 Normalize(const Vector3& v) {
 	return {v.x / len, v.y / len, v.z / len};
 }
 
-// 線形補間（2次ベジェ曲線の実装に必要）
-Vector3 Lerp(const Vector3& v1, const Vector3& v2, float t) { return Add(Scale(v1, 1.0f - t), Scale(v2, t)); }
-
 Matrix4x4 Multiply(const Matrix4x4& a, const Matrix4x4& b) {
 	Matrix4x4 result = {};
 	for (int i = 0; i < 4; i++)
@@ -48,6 +45,13 @@ Matrix4x4 Multiply(const Matrix4x4& a, const Matrix4x4& b) {
 			for (int k = 0; k < 4; k++)
 				result.m[i][j] += a.m[i][k] * b.m[k][j];
 	return result;
+}
+
+Matrix4x4 MakeScaleMatrix(const Vector3& s) {
+	Matrix4x4 m = {
+	    {{s.x, 0, 0, 0}, {0, s.y, 0, 0}, {0, 0, s.z, 0}, {0, 0, 0, 1}}
+    };
+	return m;
 }
 
 Matrix4x4 MakeTranslateMatrix(const Vector3& t) {
@@ -79,6 +83,21 @@ Matrix4x4 MakeRotateZMatrix(float angle) {
 	    {{c, s, 0, 0}, {-s, c, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}}
     };
 	return m;
+}
+
+// スケール→回転(XYZ)→平行移動の順で合成したアフィン変換行列を作る
+Matrix4x4 MakeAffineMatrix(const Vector3& scale, const Vector3& rotate, const Vector3& translate) {
+	Matrix4x4 scaleMatrix = MakeScaleMatrix(scale);
+
+	// rotateは度数法で渡される想定（ImGuiでの操作のしやすさのため）
+	float rx = rotate.x * kPi / 180.0f;
+	float ry = rotate.y * kPi / 180.0f;
+	float rz = rotate.z * kPi / 180.0f;
+	Matrix4x4 rotateMatrix = Multiply(Multiply(MakeRotateXMatrix(rx), MakeRotateYMatrix(ry)), MakeRotateZMatrix(rz));
+
+	Matrix4x4 translateMatrix = MakeTranslateMatrix(translate);
+
+	return Multiply(Multiply(scaleMatrix, rotateMatrix), translateMatrix);
 }
 
 Matrix4x4 MakePerspectiveFovMatrix(float fovY, float aspect, float nearZ, float farZ) {
@@ -172,7 +191,7 @@ void DrawGrid(const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMa
 	}
 }
 
-// 球を緯線・経線のワイヤーフレームで描画する関数（コントロールポイントの可視化用）
+// 球を緯線・経線のワイヤーフレームで描画する関数（関節の可視化用）
 void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
 	const int kSubdivision = 8;
 	const float kLonEvery = 2.0f * kPi / kSubdivision; // 経度方向の分割角度
@@ -214,27 +233,6 @@ void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, con
 	}
 }
 
-// 2次ベジェ曲線の描画関数（De Casteljauのアルゴリズムを線分近似で描画）
-void DrawBezier(const Vector3& controlPoint0, const Vector3& controlPoint1, const Vector3& controlPoint2, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
-	const int kSegmentCount = 32; // 曲線を近似する分割数
-	Vector3 prevPoint = controlPoint0;
-
-	for (int i = 1; i <= kSegmentCount; i++) {
-		float t = float(i) / float(kSegmentCount);
-
-		// p0-p1, p1-p2 をそれぞれ補間し、その結果同士をさらに補間する
-		Vector3 p0p1 = Lerp(controlPoint0, controlPoint1, t);
-		Vector3 p1p2 = Lerp(controlPoint1, controlPoint2, t);
-		Vector3 point = Lerp(p0p1, p1p2, t);
-
-		Vector3 s0 = Transform(Transform(prevPoint, viewProjectionMatrix), viewportMatrix);
-		Vector3 s1 = Transform(Transform(point, viewProjectionMatrix), viewportMatrix);
-		Novice::DrawLine((int)s0.x, (int)s0.y, (int)s1.x, (int)s1.y, color);
-
-		prevPoint = point;
-	}
-}
-
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Novice::Initialize(kWindowTitle, kWindowWidth, kWindowHeight);
 
@@ -242,11 +240,25 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Vector3 cameraRotate{0.26f, 0.0f, 0.0f};
 
 	// 実装例の初期値（スライド指定）
-	Vector3 controlPoints[3] = {
-	    {-0.8f, 0.58f, 1.0f },
-	    {1.76f, 1.0f,  -0.3f},
-	    {0.94f, -0.7f, 2.3f },
+	// [0]:肩 [1]:肘 [2]:手
+	Vector3 translates[3] = {
+	    {0.2f, 1.0f, 0.0f},
+	    {0.4f, 0.0f, 0.0f},
+	    {0.3f, 0.0f, 0.0f},
 	};
+	Vector3 rotates[3] = {
+	    {0.0f, 0.0f, -6.8f},
+	    {0.0f, 0.0f, -1.4f},
+	    {0.0f, 0.0f, 0.0f },
+	};
+	Vector3 scales[3] = {
+	    {1.0f, 1.0f, 1.0f},
+	    {1.0f, 1.0f, 1.0f},
+	    {1.0f, 1.0f, 1.0f},
+	};
+
+	const float kJointRadius = 0.05f;                                      // 関節を表す球の半径（お好みで調整してください）
+	const uint32_t kJointColors[3] = {0xFF0000FF, 0x00FF00FF, 0x0000FFFF}; // 肩:赤 肘:緑 手:青
 
 	char keys[256] = {0};
 	char preKeys[256] = {0};
@@ -262,10 +274,35 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		ImGui::Begin("Window");
-		ImGui::DragFloat3("controlPoints[0]", &controlPoints[0].x, 0.01f);
-		ImGui::DragFloat3("controlPoints[1]", &controlPoints[1].x, 0.01f);
-		ImGui::DragFloat3("controlPoints[2]", &controlPoints[2].x, 0.01f);
+		ImGui::DragFloat3("translates[0]", &translates[0].x, 0.01f);
+		ImGui::DragFloat3("rotates[0]", &rotates[0].x, 1.0f);
+		ImGui::DragFloat3("scales[0]", &scales[0].x, 0.01f);
+		ImGui::DragFloat3("translates[1]", &translates[1].x, 0.01f);
+		ImGui::DragFloat3("rotates[1]", &rotates[1].x, 1.0f);
+		ImGui::DragFloat3("scales[1]", &scales[1].x, 0.01f);
+		ImGui::DragFloat3("translates[2]", &translates[2].x, 0.01f);
+		ImGui::DragFloat3("rotates[2]", &rotates[2].x, 1.0f);
+		ImGui::DragFloat3("scales[2]", &scales[2].x, 0.01f);
 		ImGui::End();
+
+		// 各関節のローカルアフィン行列（SRT）を作成
+		Matrix4x4 affineMatrix[3];
+		for (int i = 0; i < 3; i++) {
+			affineMatrix[i] = MakeAffineMatrix(scales[i], rotates[i], translates[i]);
+		}
+
+		// 親子関係を考慮してワールド行列を合成する
+		// 肩がルート、肘は肩の子、手は肘の子
+		Matrix4x4 worldMatrix[3];
+		worldMatrix[0] = affineMatrix[0];                           // 肩
+		worldMatrix[1] = Multiply(affineMatrix[1], worldMatrix[0]); // 肘 = 自身のローカル行列 * 肩のワールド行列
+		worldMatrix[2] = Multiply(affineMatrix[2], worldMatrix[1]); // 手 = 自身のローカル行列 * 肘のワールド行列
+
+		// 各関節のワールド座標（原点をワールド行列で変換すれば位置が求まる）
+		Vector3 jointPositions[3];
+		for (int i = 0; i < 3; i++) {
+			jointPositions[i] = Transform({0.0f, 0.0f, 0.0f}, worldMatrix[i]);
+		}
 
 		Matrix4x4 cameraRotateMatrix = Multiply(Multiply(MakeRotateXMatrix(cameraRotate.x), MakeRotateYMatrix(cameraRotate.y)), MakeRotateZMatrix(cameraRotate.z));
 		Matrix4x4 cameraMatrix = Multiply(cameraRotateMatrix, MakeTranslateMatrix(cameraTranslate));
@@ -283,12 +320,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
-		DrawBezier(controlPoints[0], controlPoints[1], controlPoints[2], viewProjectionMatrix, viewportMatrix, 0x0000FFFF);
 
-		// コントロールポイントを黒い球（半径0.01m）で描画
+		// 肩-肘、肘-手の間に線を引く
+		for (int i = 0; i < 2; i++) {
+			Vector3 s = Transform(Transform(jointPositions[i], viewProjectionMatrix), viewportMatrix);
+			Vector3 e = Transform(Transform(jointPositions[i + 1], viewProjectionMatrix), viewportMatrix);
+			Novice::DrawLine((int)s.x, (int)s.y, (int)e.x, (int)e.y, 0xFFFFFFFF);
+		}
+
+		// 肩・肘・手を球で描画
 		for (int i = 0; i < 3; i++) {
-			Sphere sphere{controlPoints[i], 0.01f};
-			DrawSphere(sphere, viewProjectionMatrix, viewportMatrix, 0x000000FF);
+			Sphere sphere{jointPositions[i], kJointRadius};
+			DrawSphere(sphere, viewProjectionMatrix, viewportMatrix, kJointColors[i]);
 		}
 
 		///
