@@ -281,12 +281,21 @@ void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, con
 	}
 }
 
-struct Spring {
-	Vector3 anchor;
-	float naturalLength;
-	float stiffness;
-	float dampingCoefficient;
+// ===== 等速円運動 =====
+struct CircularMotion {
+	Vector3 center;        // 円の中心
+	float radius;          // 半径
+	float angularVelocity; // 角速度[rad/s]
+	float angle;           // 現在の角度[rad]
 };
+
+void UpdateCircularMotion(CircularMotion& motion, Vector3& outPosition, float deltaTime) {
+	motion.angle += motion.angularVelocity * deltaTime;
+
+	outPosition.x = motion.center.x + motion.radius * cosf(motion.angle);
+	outPosition.y = motion.center.y + motion.radius * sinf(motion.angle);
+	outPosition.z = motion.center.z;
+}
 
 struct Ball {
 	Vector3 position;
@@ -296,25 +305,6 @@ struct Ball {
 	float radius;
 	uint32_t color;
 };
-
-void UpdateSpring(Spring& spring, Ball& ball, float deltaTime) {
-	Vector3 diff = ball.position - spring.anchor;
-	float length = Length(diff);
-	if (length == 0.0f)
-		return;
-
-	Vector3 direction = Normalize(diff);
-	Vector3 restPosition = spring.anchor + direction * spring.naturalLength;
-	Vector3 displacement = ball.position - restPosition;
-
-	Vector3 restoringForce = displacement * (-spring.stiffness);
-	Vector3 dampingForce = ball.velocity * (-spring.dampingCoefficient);
-	Vector3 force = restoringForce + dampingForce;
-
-	ball.acceleration = force * (1.0f / ball.mass);
-	ball.velocity += ball.acceleration * deltaTime;
-	ball.position += ball.velocity * deltaTime;
-}
 
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Novice::Initialize(kWindowTitle, kWindowWidth, kWindowHeight);
@@ -334,14 +324,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Vector3 cameraTranslate{0.0f, 1.9f, -6.49f};
 	Vector3 cameraRotate{0.26f, 0.0f, 0.0f};
 
-	Spring spring{};
-	spring.anchor = {0.0f, 0.0f, 0.0f};
-	spring.naturalLength = 1.0f;
-	spring.stiffness = 100.0f;
-	spring.dampingCoefficient = 2.0f;
+	CircularMotion circularMotion{};
+	circularMotion.center = {0.0f, 0.0f, 0.0f};
+	circularMotion.radius = 0.8f;
+	circularMotion.angularVelocity = kPi; // 2秒で1周
+	circularMotion.angle = 0.0f;
 
 	Ball ball{};
-	ball.position = {1.2f, 0.0f, 0.0f};
+	ball.position = {circularMotion.radius, 0.0f, 0.0f}; // 角度0の位置からスタート
 	ball.mass = 2.0f;
 	ball.radius = 0.05f;
 	ball.color = 0x0000FFFFu;
@@ -369,7 +359,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		if (isSimulating) {
 			const float deltaTime = 1.0f / 60.0f;
-			UpdateSpring(spring, ball, deltaTime);
+			UpdateCircularMotion(circularMotion, ball.position, deltaTime);
 		}
 
 		ImGui::Begin("Window");
@@ -387,12 +377,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
-
-		{
-			Vector3 screenAnchor = Transform(Transform(spring.anchor, viewProjectionMatrix), viewportMatrix);
-			Vector3 screenBall = Transform(Transform(ball.position, viewProjectionMatrix), viewportMatrix);
-			Novice::DrawLine(int(screenAnchor.x), int(screenAnchor.y), int(screenBall.x), int(screenBall.y), 0x000000FFu);
-		}
 
 		DrawSphere({ball.position, ball.radius}, viewProjectionMatrix, viewportMatrix, ball.color);
 
