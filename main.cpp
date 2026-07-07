@@ -281,20 +281,27 @@ void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, con
 	}
 }
 
-// ===== 等速円運動 =====
-struct CircularMotion {
-	Vector3 center;        // 円の中心
-	float radius;          // 半径
-	float angularVelocity; // 角速度[rad/s]
-	float angle;           // 現在の角度[rad]
+// ===== 振り子 =====
+struct Pendulum {
+	Vector3 anchor;            // アンカーポイント。固定された端の位置
+	float length;              // 紐の長さ
+	float angle;               // 現在の角度
+	float angularVelocity;     // 角速度ω
+	float angularAcceleration; // 角加速度
 };
 
-void UpdateCircularMotion(CircularMotion& motion, Vector3& outPosition, float deltaTime) {
-	motion.angle += motion.angularVelocity * deltaTime;
+void UpdatePendulum(Pendulum& pendulum, float deltaTime) {
+	pendulum.angularAcceleration = -(9.8f / pendulum.length) * std::sin(pendulum.angle);
+	pendulum.angularVelocity += pendulum.angularAcceleration * deltaTime;
+	pendulum.angle += pendulum.angularVelocity * deltaTime;
+}
 
-	outPosition.x = motion.center.x + motion.radius * cosf(motion.angle);
-	outPosition.y = motion.center.y + motion.radius * sinf(motion.angle);
-	outPosition.z = motion.center.z;
+Vector3 ComputePendulumTipPosition(const Pendulum& pendulum) {
+	Vector3 p{};
+	p.x = pendulum.anchor.x + std::sin(pendulum.angle) * pendulum.length;
+	p.y = pendulum.anchor.y - std::cos(pendulum.angle) * pendulum.length;
+	p.z = pendulum.anchor.z;
+	return p;
 }
 
 struct Ball {
@@ -324,14 +331,15 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Vector3 cameraTranslate{0.0f, 1.9f, -6.49f};
 	Vector3 cameraRotate{0.26f, 0.0f, 0.0f};
 
-	CircularMotion circularMotion{};
-	circularMotion.center = {0.0f, 0.0f, 0.0f};
-	circularMotion.radius = 0.8f;
-	circularMotion.angularVelocity = kPi; // 2秒で1周
-	circularMotion.angle = 0.0f;
+	Pendulum pendulum{};
+	pendulum.anchor = {0.0f, 1.0f, 0.0f};
+	pendulum.length = 0.8f;
+	pendulum.angle = 0.7f;
+	pendulum.angularVelocity = 0.0f;
+	pendulum.angularAcceleration = 0.0f;
 
 	Ball ball{};
-	ball.position = {circularMotion.radius, 0.0f, 0.0f}; // 角度0の位置からスタート
+	ball.position = ComputePendulumTipPosition(pendulum); // 初期位置は振り子の初期角度から計算
 	ball.mass = 2.0f;
 	ball.radius = 0.05f;
 	ball.color = 0x0000FFFFu;
@@ -359,8 +367,10 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		if (isSimulating) {
 			const float deltaTime = 1.0f / 60.0f;
-			UpdateCircularMotion(circularMotion, ball.position, deltaTime);
+			UpdatePendulum(pendulum, deltaTime);
 		}
+
+		ball.position = ComputePendulumTipPosition(pendulum);
 
 		ImGui::Begin("Window");
 		if (ImGui::Button("Start")) {
@@ -377,6 +387,12 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
+
+		{
+			Vector3 screenAnchor = Transform(Transform(pendulum.anchor, viewProjectionMatrix), viewportMatrix);
+			Vector3 screenBall = Transform(Transform(ball.position, viewProjectionMatrix), viewportMatrix);
+			Novice::DrawLine(int(screenAnchor.x), int(screenAnchor.y), int(screenBall.x), int(screenBall.y), 0x000000FFu);
+		}
 
 		DrawSphere({ball.position, ball.radius}, viewProjectionMatrix, viewportMatrix, ball.color);
 
