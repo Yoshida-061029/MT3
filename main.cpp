@@ -1,13 +1,13 @@
 #define _USE_MATH_DEFINES
 #include <Novice.h>
 #include <cmath>
-#include <imgui.h>
 
 const char kWindowTitle[] = "GC2C_08_ヨシダ_ハルキ";
 const int kWindowHeight = 720;
 const int kWindowWidth = 1280;
 
 constexpr float kPi = 3.14159265358979323846f;
+// WHITE は Novice.h 側で定義済みのマクロを使用する
 
 struct Vector3 {
 	float x, y, z;
@@ -215,6 +215,18 @@ Vector3 Normalize(const Vector3& v) {
 	return {v.x / len, v.y / len, v.z / len};
 }
 
+float Dot(const Vector3& a, const Vector3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+Vector3 Cross(const Vector3& a, const Vector3& b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+
+// 与えられたベクトルに垂直なベクトルを1つ求める
+Vector3 Perpendicular(const Vector3& vector) {
+	if (vector.x != 0.0f || vector.y != 0.0f) {
+		return {-vector.y, vector.x, 0.0f};
+	}
+	return {0.0f, -vector.z, vector.y};
+}
+
 void DrawGrid(const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix) {
 	const float kGridHalfWidth = 2.0f;
 	const uint32_t kSubdivision = 10;
@@ -281,30 +293,33 @@ void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, con
 	}
 }
 
-// ===== 円錐振り子 =====
-struct ConicalPendulum {
-	Vector3 anchor;        // アンカーポイント。固定された端の位置
-	float length;          // 紐の長さ
-	float halfApexAngle;   // 円錐の頂角の半分
-	float angle;           // 現在の角度（紐がz軸周りにどれだけ回転しているか）
-	float angularVelocity; // 角速度ω
+// ===== 平面 =====
+struct Plane {
+	Vector3 normal; // 法線ベクトル
+	float distance; // 原点からの距離
 };
 
-void UpdateConicalPendulum(ConicalPendulum& conicalPendulum, float deltaTime) {
-	// ω = sqrt( g / (L * cosθ) )
-	conicalPendulum.angularVelocity = std::sqrt(9.8f / (conicalPendulum.length * std::cos(conicalPendulum.halfApexAngle)));
-	conicalPendulum.angle += conicalPendulum.angularVelocity * deltaTime;
-}
+void DrawPlane(const Plane& plane, const Matrix4x4& viewProjectionMatrix, const Matrix4x4& viewportMatrix, uint32_t color) {
+	Vector3 center = plane.normal * plane.distance; // 平面上の1点（原点から法線方向に distance 進んだ点）
 
-Vector3 ComputeConicalPendulumTipPosition(const ConicalPendulum& conicalPendulum) {
-	float radius = std::sin(conicalPendulum.halfApexAngle) * conicalPendulum.length;
-	float height = std::cos(conicalPendulum.halfApexAngle) * conicalPendulum.length;
+	Vector3 perpendiculars[4];
+	perpendiculars[0] = Normalize(Perpendicular(plane.normal));                             // 法線と垂直なベクトルを1つ求める
+	perpendiculars[1] = {-perpendiculars[0].x, -perpendiculars[0].y, -perpendiculars[0].z}; // その逆ベクトル
+	perpendiculars[2] = Cross(plane.normal, perpendiculars[0]);                             // 外積でさらに垂直なベクトルを求める
+	perpendiculars[3] = {-perpendiculars[2].x, -perpendiculars[2].y, -perpendiculars[2].z}; // その逆ベクトル
 
-	Vector3 p{};
-	p.x = conicalPendulum.anchor.x + std::cos(conicalPendulum.angle) * radius;
-	p.y = conicalPendulum.anchor.y - height;
-	p.z = conicalPendulum.anchor.z - std::sin(conicalPendulum.angle) * radius;
-	return p;
+	Vector3 points[4];
+	for (int32_t index = 0; index < 4; ++index) {
+		Vector3 extend = perpendiculars[index] * 2.0f;
+		Vector3 point = center + extend;
+		points[index] = Transform(Transform(point, viewProjectionMatrix), viewportMatrix);
+	}
+
+	// pointsを結んでひし形の平面を描画する
+	Novice::DrawLine(int(points[0].x), int(points[0].y), int(points[2].x), int(points[2].y), color);
+	Novice::DrawLine(int(points[2].x), int(points[2].y), int(points[1].x), int(points[1].y), color);
+	Novice::DrawLine(int(points[1].x), int(points[1].y), int(points[3].x), int(points[3].y), color);
+	Novice::DrawLine(int(points[3].x), int(points[3].y), int(points[0].x), int(points[0].y), color);
 }
 
 struct Ball {
@@ -315,6 +330,37 @@ struct Ball {
 	float radius;
 	uint32_t color;
 };
+
+// 球と平面の衝突判定
+bool IsCollision(const Sphere& sphere, const Plane& plane) {
+	float distance = Dot(sphere.center, plane.normal) - plane.distance;
+	return fabsf(distance) <= sphere.radius;
+}
+
+void UpdateBall(Ball& ball, const Plane& plane, float deltaTime) {
+	const float kGravity = 9.8f;
+	const float kBounciness = 0.8f; // 反発係数
+
+	ball.acceleration = {0.0f, -kGravity, 0.0f};
+	ball.velocity += ball.acceleration * deltaTime;
+	ball.position += ball.velocity * deltaTime;
+
+	Sphere sphere{ball.position, ball.radius};
+	if (IsCollision(sphere, plane)) {
+		// 貫通分を押し戻す
+		float penetration = Dot(ball.position, plane.normal) - plane.distance;
+		float side = (penetration >= 0.0f) ? 1.0f : -1.0f;
+		ball.position -= plane.normal * (penetration - side * ball.radius);
+
+		// 法線方向の速度を反発係数分だけ跳ね返す
+		float velocityDotNormal = Dot(ball.velocity, plane.normal);
+		if (velocityDotNormal * side < 0.0f) {
+			Vector3 velocityNormalComponent = plane.normal * velocityDotNormal;
+			Vector3 velocityTangentComponent = ball.velocity - velocityNormalComponent;
+			ball.velocity = velocityTangentComponent - velocityNormalComponent * kBounciness;
+		}
+	}
+}
 
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Novice::Initialize(kWindowTitle, kWindowWidth, kWindowHeight);
@@ -334,21 +380,21 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Vector3 cameraTranslate{0.0f, 1.9f, -6.49f};
 	Vector3 cameraRotate{0.26f, 0.0f, 0.0f};
 
-	// ===== 円錐振り子の初期値（課題実装例の初期値） =====
-	ConicalPendulum conicalPendulum{};
-	conicalPendulum.anchor = {0.0f, 1.0f, 0.0f};
-	conicalPendulum.length = 0.8f;
-	conicalPendulum.halfApexAngle = 0.7f;
-	conicalPendulum.angle = 0.0f;
-	conicalPendulum.angularVelocity = 0.0f;
+	// ===== 平面の初期値（課題実装例の初期値） =====
+	Plane plane;
+	plane.normal = Normalize({-0.2f, 0.9f, -0.3f});
+	plane.distance = 0.0f;
 
+	// ===== ボールの初期値（課題実装例の初期値） =====
 	Ball ball{};
-	ball.position = ComputeConicalPendulumTipPosition(conicalPendulum); // 初期位置は円錐振り子の初期角度から計算
+	ball.position = {0.8f, 1.2f, 0.3f};
+	ball.velocity = {0.0f, 0.0f, 0.0f};
+	ball.acceleration = {0.0f, 0.0f, 0.0f};
 	ball.mass = 2.0f;
 	ball.radius = 0.05f;
-	ball.color = 0x0000FFFFu;
+	ball.color = WHITE;
 
-	bool isSimulating = false;
+	bool isSimulating = true; // 起動と同時にシミュレーション開始
 
 	char keys[256] = {0};
 	char preKeys[256] = {0};
@@ -371,18 +417,8 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		if (isSimulating) {
 			const float deltaTime = 1.0f / 60.0f;
-			UpdateConicalPendulum(conicalPendulum, deltaTime);
+			UpdateBall(ball, plane, deltaTime);
 		}
-
-		ball.position = ComputeConicalPendulumTipPosition(conicalPendulum);
-
-		ImGui::Begin("Window");
-		if (ImGui::Button("Start")) {
-			isSimulating = true;
-		}
-		ImGui::DragFloat("Length", &conicalPendulum.length, 0.01f, 0.01f, 5.0f);
-		ImGui::DragFloat("HalfApexAngle", &conicalPendulum.halfApexAngle, 0.01f, 0.01f, kPi / 2.0f - 0.01f);
-		ImGui::End();
 
 		///
 		/// ↑更新処理ここまで
@@ -393,13 +429,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
-
-		{
-			Vector3 screenAnchor = Transform(Transform(conicalPendulum.anchor, viewProjectionMatrix), viewportMatrix);
-			Vector3 screenBall = Transform(Transform(ball.position, viewProjectionMatrix), viewportMatrix);
-			Novice::DrawLine(int(screenAnchor.x), int(screenAnchor.y), int(screenBall.x), int(screenBall.y), 0x000000FFu);
-		}
-
+		DrawPlane(plane, viewProjectionMatrix, viewportMatrix, WHITE);
 		DrawSphere({ball.position, ball.radius}, viewProjectionMatrix, viewportMatrix, ball.color);
 
 		///
