@@ -281,26 +281,29 @@ void DrawSphere(const Sphere& sphere, const Matrix4x4& viewProjectionMatrix, con
 	}
 }
 
-// ===== 振り子 =====
-struct Pendulum {
-	Vector3 anchor;            // アンカーポイント。固定された端の位置
-	float length;              // 紐の長さ
-	float angle;               // 現在の角度
-	float angularVelocity;     // 角速度ω
-	float angularAcceleration; // 角加速度
+// ===== 円錐振り子 =====
+struct ConicalPendulum {
+	Vector3 anchor;        // アンカーポイント。固定された端の位置
+	float length;          // 紐の長さ
+	float halfApexAngle;   // 円錐の頂角の半分
+	float angle;           // 現在の角度（紐がz軸周りにどれだけ回転しているか）
+	float angularVelocity; // 角速度ω
 };
 
-void UpdatePendulum(Pendulum& pendulum, float deltaTime) {
-	pendulum.angularAcceleration = -(9.8f / pendulum.length) * std::sin(pendulum.angle);
-	pendulum.angularVelocity += pendulum.angularAcceleration * deltaTime;
-	pendulum.angle += pendulum.angularVelocity * deltaTime;
+void UpdateConicalPendulum(ConicalPendulum& conicalPendulum, float deltaTime) {
+	// ω = sqrt( g / (L * cosθ) )
+	conicalPendulum.angularVelocity = std::sqrt(9.8f / (conicalPendulum.length * std::cos(conicalPendulum.halfApexAngle)));
+	conicalPendulum.angle += conicalPendulum.angularVelocity * deltaTime;
 }
 
-Vector3 ComputePendulumTipPosition(const Pendulum& pendulum) {
+Vector3 ComputeConicalPendulumTipPosition(const ConicalPendulum& conicalPendulum) {
+	float radius = std::sin(conicalPendulum.halfApexAngle) * conicalPendulum.length;
+	float height = std::cos(conicalPendulum.halfApexAngle) * conicalPendulum.length;
+
 	Vector3 p{};
-	p.x = pendulum.anchor.x + std::sin(pendulum.angle) * pendulum.length;
-	p.y = pendulum.anchor.y - std::cos(pendulum.angle) * pendulum.length;
-	p.z = pendulum.anchor.z;
+	p.x = conicalPendulum.anchor.x + std::cos(conicalPendulum.angle) * radius;
+	p.y = conicalPendulum.anchor.y - height;
+	p.z = conicalPendulum.anchor.z - std::sin(conicalPendulum.angle) * radius;
 	return p;
 }
 
@@ -331,15 +334,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Vector3 cameraTranslate{0.0f, 1.9f, -6.49f};
 	Vector3 cameraRotate{0.26f, 0.0f, 0.0f};
 
-	Pendulum pendulum{};
-	pendulum.anchor = {0.0f, 1.0f, 0.0f};
-	pendulum.length = 0.8f;
-	pendulum.angle = 0.7f;
-	pendulum.angularVelocity = 0.0f;
-	pendulum.angularAcceleration = 0.0f;
+	// ===== 円錐振り子の初期値（課題実装例の初期値） =====
+	ConicalPendulum conicalPendulum{};
+	conicalPendulum.anchor = {0.0f, 1.0f, 0.0f};
+	conicalPendulum.length = 0.8f;
+	conicalPendulum.halfApexAngle = 0.7f;
+	conicalPendulum.angle = 0.0f;
+	conicalPendulum.angularVelocity = 0.0f;
 
 	Ball ball{};
-	ball.position = ComputePendulumTipPosition(pendulum); // 初期位置は振り子の初期角度から計算
+	ball.position = ComputeConicalPendulumTipPosition(conicalPendulum); // 初期位置は円錐振り子の初期角度から計算
 	ball.mass = 2.0f;
 	ball.radius = 0.05f;
 	ball.color = 0x0000FFFFu;
@@ -367,15 +371,17 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		if (isSimulating) {
 			const float deltaTime = 1.0f / 60.0f;
-			UpdatePendulum(pendulum, deltaTime);
+			UpdateConicalPendulum(conicalPendulum, deltaTime);
 		}
 
-		ball.position = ComputePendulumTipPosition(pendulum);
+		ball.position = ComputeConicalPendulumTipPosition(conicalPendulum);
 
 		ImGui::Begin("Window");
 		if (ImGui::Button("Start")) {
 			isSimulating = true;
 		}
+		ImGui::DragFloat("Length", &conicalPendulum.length, 0.01f, 0.01f, 5.0f);
+		ImGui::DragFloat("HalfApexAngle", &conicalPendulum.halfApexAngle, 0.01f, 0.01f, kPi / 2.0f - 0.01f);
 		ImGui::End();
 
 		///
@@ -389,7 +395,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		DrawGrid(viewProjectionMatrix, viewportMatrix);
 
 		{
-			Vector3 screenAnchor = Transform(Transform(pendulum.anchor, viewProjectionMatrix), viewportMatrix);
+			Vector3 screenAnchor = Transform(Transform(conicalPendulum.anchor, viewProjectionMatrix), viewportMatrix);
 			Vector3 screenBall = Transform(Transform(ball.position, viewProjectionMatrix), viewportMatrix);
 			Novice::DrawLine(int(screenAnchor.x), int(screenAnchor.y), int(screenBall.x), int(screenBall.y), 0x000000FFu);
 		}
